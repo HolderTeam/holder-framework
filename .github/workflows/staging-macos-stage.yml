@@ -1,0 +1,635 @@
+name: macOS staged app
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktop_run_id:
+        description: GitHub Actions run ID that uploaded holder-desktop-macos
+        required: true
+        type: string
+      backend_run_id:
+        description: GitHub Actions run ID that uploaded holder-daemon-macos-backend
+        required: true
+        type: string
+      launcher_run_id:
+        description: GitHub Actions run ID that uploaded holder-launcher-macos
+        required: true
+        type: string
+      desktop_repository:
+        description: Repository containing the desktop artifact and packaging metadata
+        required: true
+        type: string
+        default: HolderTeam/holder-desktop
+      desktop_ref:
+        description: holder-desktop ref to read VERSION and macOS packaging templates from
+        required: true
+        type: string
+        default: master
+      backend_repository:
+        description: Repository containing the backend artifact
+        required: true
+        type: string
+        default: HolderTeam/holder-daemon
+      launcher_repository:
+        description: Repository containing the launcher artifact
+        required: true
+        type: string
+        default: HolderTeam/holder-launcher
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  stage:
+    runs-on: macos-15
+
+    steps:
+      - name: Check out holder-staging
+        uses: actions/checkout@v4
+        with:
+          path: sources/holder-staging
+
+      - name: Check out holder-desktop metadata
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.desktop_repository }}
+          ref: ${{ inputs.desktop_ref }}
+          token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          path: sources/holder-desktop
+
+      - name: Download desktop artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: holder-desktop-macos
+          path: downloads/desktop
+          github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          repository: ${{ inputs.desktop_repository }}
+          run-id: ${{ inputs.desktop_run_id }}
+
+      - name: Download backend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: holder-daemon-macos-backend
+          path: downloads/backend
+          github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          repository: ${{ inputs.backend_repository }}
+          run-id: ${{ inputs.backend_run_id }}
+
+      - name: Download launcher artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: holder-launcher-macos
+          path: downloads/launcher
+          github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          repository: ${{ inputs.launcher_repository }}
+          run-id: ${{ inputs.launcher_run_id }}
+
+      - name: Install Homebrew runtime tools
+        run: |
+          set -euo pipefail
+
+          brew update
+          brew install \
+            dylibbundler \
+            adwaita-icon-theme \
+            gtk4 \
+            libadwaita \
+            gtksourceview5 \
+            libspelling \
+            libgee \
+            libsoup \
+            json-glib \
+            vte3 \
+            boost \
+            nlohmann-json \
+            yaml-cpp \
+            spdlog \
+            sqlite \
+            libsodium \
+            libgit2 \
+            md4c \
+            openssl@3
+
+      - name: Assemble Holder.app
+        run: |
+          set -euo pipefail
+
+          desktop_source_dir="sources/holder-desktop"
+          staging_source_dir="sources/holder-staging"
+          version="$(tr -d '[:space:]' < "${desktop_source_dir}/VERSION")"
+          homebrew_prefix="$(brew --prefix)"
+          homebrew_enchant_prefix="$(brew --prefix enchant)"
+          homebrew_gdk_pixbuf_prefix="$(brew --prefix gdk-pixbuf)"
+          homebrew_gtksourceview_prefix="$(brew --prefix gtksourceview5)"
+          homebrew_openssl_prefix="$(brew --prefix openssl@3)"
+          app_dir="out/artifacts/Holder.app"
+          contents_dir="${app_dir}/Contents"
+          resources_dir="${contents_dir}/Resources"
+          metadata_dir="${resources_dir}/release"
+
+          rm -rf "${app_dir}"
+          mkdir -p \
+            "${contents_dir}/MacOS" \
+            "${resources_dir}/bin" \
+            "${resources_dir}/lib" \
+            "${resources_dir}/share" \
+            "${metadata_dir}/packaging/macos"
+
+          sed "s/@HOLDER_VERSION@/${version}/g" \
+            "${desktop_source_dir}/packaging/macos/Info.plist.in" \
+            > "${contents_dir}/Info.plist"
+          cp "${desktop_source_dir}/packaging/macos/Holder.entitlements" \
+            "${metadata_dir}/packaging/macos/Holder.entitlements"
+
+          cp downloads/launcher/Holder "${contents_dir}/MacOS/Holder"
+          cp downloads/desktop/bin/holder-desktop "${resources_dir}/bin/holder-desktop"
+          cp downloads/backend/bin/holderd "${resources_dir}/bin/holderd"
+          cp downloads/backend/bin/holderctl "${resources_dir}/bin/holderctl"
+          chmod +x \
+            "${contents_dir}/MacOS/Holder" \
+            "${resources_dir}/bin/holder-desktop" \
+            "${resources_dir}/bin/holderd" \
+            "${resources_dir}/bin/holderctl"
+
+          cp -a downloads/desktop/share/. "${resources_dir}/share/"
+          cp -a downloads/backend/schema "${resources_dir}/schema"
+          cp -a downloads/backend/config "${resources_dir}/config"
+          cp -a downloads/backend/assets "${resources_dir}/assets"
+          cp downloads/backend/openapi.yaml "${resources_dir}/openapi.yaml"
+
+          copy_tree_dereference_if_exists() {
+            local source_dir="$1"
+            local target_dir="$2"
+            if [ -d "${source_dir}" ]; then
+              mkdir -p "${target_dir}"
+              chmod -R u+w "${target_dir}"
+              cp -aL "${source_dir}/." "${target_dir}/"
+              chmod -R u+w "${target_dir}"
+            fi
+          }
+
+          copy_tree_dereference_if_exists "${homebrew_prefix}/share/glib-2.0" "${resources_dir}/share/glib-2.0"
+          cp downloads/desktop/share/glib-2.0/schemas/team.holder.Holder.gschema.xml \
+            "${resources_dir}/share/glib-2.0/schemas/"
+          copy_tree_dereference_if_exists "${homebrew_prefix}/share/icons" "${resources_dir}/share/icons"
+          copy_tree_dereference_if_exists "$(brew --prefix adwaita-icon-theme)/share/icons" "${resources_dir}/share/icons"
+          copy_tree_dereference_if_exists "${homebrew_prefix}/share/themes" "${resources_dir}/share/themes"
+          copy_tree_dereference_if_exists "${homebrew_prefix}/share/gtk-4.0" "${resources_dir}/share/gtk-4.0"
+          copy_tree_dereference_if_exists "${homebrew_prefix}/share/libadwaita" "${resources_dir}/share/libadwaita"
+          copy_tree_dereference_if_exists "${homebrew_gtksourceview_prefix}/share/gtksourceview-5" "${resources_dir}/share/gtksourceview-5"
+          copy_tree_dereference_if_exists "${homebrew_prefix}/share/gtksourceview-5" "${resources_dir}/share/gtksourceview-5"
+          copy_tree_dereference_if_exists "${homebrew_enchant_prefix}/share/enchant-2" "${resources_dir}/share/enchant-2"
+          copy_tree_dereference_if_exists "${homebrew_prefix}/share/enchant-2" "${resources_dir}/share/enchant-2"
+          copy_tree_dereference_if_exists "${homebrew_prefix}/share/locale" "${resources_dir}/share/locale"
+
+          hunspell_dir="${resources_dir}/share/enchant/hunspell"
+          mkdir -p "${hunspell_dir}"
+          for dictionary_file in en_GB.aff en_GB.dic en_US.aff en_US.dic; do
+            curl --fail --location --show-error \
+              "https://raw.githubusercontent.com/LibreOffice/dictionaries/master/en/${dictionary_file}" \
+              --output "${hunspell_dir}/${dictionary_file}"
+          done
+
+          find "${resources_dir}" -type f \( -name '*.a' -o -name '*.la' -o -name '*.h' \) -delete
+
+          glib-compile-schemas "${resources_dir}/share/glib-2.0/schemas"
+
+          bundle_binary() {
+            local binary="$1"
+            local prefix="$2"
+            local overwrite_mode="$3"
+            local search_args=(-s "${homebrew_prefix}/lib")
+
+            if [ -d "${homebrew_openssl_prefix}/lib" ] &&
+              [ "${homebrew_openssl_prefix}/lib" != "${homebrew_prefix}/lib" ]; then
+              search_args+=(-s "${homebrew_openssl_prefix}/lib")
+            fi
+
+            dylibbundler \
+              "${overwrite_mode}" \
+              -b \
+              -x "${binary}" \
+              -d "${resources_dir}/lib" \
+              -p "${prefix}" \
+              "${search_args[@]}"
+          }
+
+          bundle_binary "${contents_dir}/MacOS/Holder" "@executable_path/../Resources/lib" "-od"
+          bundle_binary "${resources_dir}/bin/holder-desktop" "@executable_path/../lib" "-of"
+          bundle_binary "${resources_dir}/bin/holderd" "@executable_path/../lib" "-of"
+          bundle_binary "${resources_dir}/bin/holderctl" "@executable_path/../lib" "-of"
+
+          find "${resources_dir}" -type f -name '*.dylib' -exec chmod u+w {} \;
+
+          resolve_dependency_source() {
+            local dependency="$1"
+            local name="$2"
+
+            case "${dependency}" in
+              /usr/lib/*|/System/*)
+                return 1
+                ;;
+              "${resources_dir}/lib/"*)
+                if [ -f "${dependency}" ]; then
+                  printf '%s\n' "${dependency}"
+                  return 0
+                fi
+                ;;
+              "${homebrew_prefix}"/*|/opt/homebrew/*)
+                if [ -f "${dependency}" ]; then
+                  printf '%s\n' "${dependency}"
+                  return 0
+                fi
+                ;;
+            esac
+
+            if [ -f "${resources_dir}/lib/${name}" ]; then
+              printf '%s\n' "${resources_dir}/lib/${name}"
+              return 0
+            fi
+
+            if [ -f "${homebrew_prefix}/lib/${name}" ]; then
+              printf '%s\n' "${homebrew_prefix}/lib/${name}"
+              return 0
+            fi
+
+            find "${homebrew_prefix}/Cellar" -path "*/lib/${name}" \( -type f -o -type l \) -print -quit
+          }
+
+          ensure_bundled_library() {
+            local dependency="$1"
+            local name="${dependency##*/}"
+            local target="${resources_dir}/lib/${name}"
+            local source_path
+
+            if [ -f "${target}" ]; then
+              return 0
+            fi
+
+            source_path="$(resolve_dependency_source "${dependency}" "${name}" || true)"
+            if [ -z "${source_path}" ]; then
+              return 0
+            fi
+
+            cp -aL "${source_path}" "${target}"
+            chmod u+w "${target}"
+          }
+
+          normalize_bundled_library() {
+            local library="$1"
+            local name="${library##*/}"
+
+            chmod u+w "${library}"
+            install_name_tool -id "@loader_path/${name}" "${library}" 2>/dev/null || true
+
+            while IFS= read -r dependency; do
+              case "${dependency}" in
+                /usr/lib/*|/System/*)
+                  continue
+                  ;;
+              esac
+
+              local dependency_name="${dependency##*/}"
+              ensure_bundled_library "${dependency}"
+
+              if [ -f "${resources_dir}/lib/${dependency_name}" ]; then
+                install_name_tool \
+                  -change "${dependency}" "@loader_path/${dependency_name}" \
+                  "${library}" 2>/dev/null || true
+              fi
+            done < <(otool -L "${library}" | awk 'NR > 1 { print $1 }')
+
+            codesign --force --deep --preserve-metadata=entitlements,requirements,flags,runtime \
+              --sign - "${library}"
+          }
+
+          fix_module_dependencies() {
+            local module="$1"
+            local dependency_prefix="$2"
+            local module_name="${module##*/}"
+
+            chmod u+w "${module}"
+            install_name_tool -id "@loader_path/${module_name}" "${module}" 2>/dev/null || true
+
+            while IFS= read -r dependency; do
+              case "${dependency}" in
+                /usr/lib/*|/System/*)
+                  continue
+                  ;;
+              esac
+
+              local dependency_name="${dependency##*/}"
+              ensure_bundled_library "${dependency}"
+
+              if [ -f "${resources_dir}/lib/${dependency_name}" ]; then
+                install_name_tool \
+                  -change "${dependency}" "${dependency_prefix}/${dependency_name}" \
+                  "${module}" 2>/dev/null || true
+              fi
+            done < <(otool -L "${module}" | awk 'NR > 1 { print $1 }')
+
+            codesign --force --deep --preserve-metadata=entitlements,requirements,flags,runtime \
+              --sign - "${module}"
+          }
+
+          copy_tree_dereference_if_exists "${homebrew_prefix}/lib/gio" "${resources_dir}/lib/gio"
+          copy_tree_dereference_if_exists "${homebrew_enchant_prefix}/lib/enchant-2" "${resources_dir}/lib/enchant-2"
+          copy_tree_dereference_if_exists "${homebrew_prefix}/lib/enchant-2" "${resources_dir}/lib/enchant-2"
+          copy_tree_dereference_if_exists "${homebrew_gdk_pixbuf_prefix}/lib/gdk-pixbuf-2.0" "${resources_dir}/lib/gdk-pixbuf-2.0"
+          copy_tree_dereference_if_exists "${homebrew_prefix}/lib/gdk-pixbuf-2.0" "${resources_dir}/lib/gdk-pixbuf-2.0"
+          copy_tree_dereference_if_exists "${homebrew_prefix}/lib/gtk-4.0" "${resources_dir}/lib/gtk-4.0"
+
+          find "${resources_dir}" -type f \( -name '*.a' -o -name '*.la' -o -name '*.h' \) -delete
+
+          pixbuf_loaders_dir="${resources_dir}/lib/gdk-pixbuf-2.0/2.10.0/loaders"
+          if [ -d "${pixbuf_loaders_dir}" ]; then
+            if ! find "${pixbuf_loaders_dir}" -maxdepth 1 -type f -name '*.so' | grep -q .; then
+              echo "Missing gdk-pixbuf loader modules in ${pixbuf_loaders_dir}"
+              find "${resources_dir}/lib/gdk-pixbuf-2.0" -maxdepth 6 -ls 2>/dev/null || true
+              exit 1
+            fi
+
+            while IFS= read -r loader; do
+              fix_module_dependencies "${loader}" "@loader_path/../../.."
+            done < <(find "${pixbuf_loaders_dir}" -maxdepth 1 -type f -name '*.so' | sort)
+          fi
+
+          enchant_modules_dir="${resources_dir}/lib/enchant-2"
+          if [ -d "${enchant_modules_dir}" ]; then
+            if ! find "${enchant_modules_dir}" -maxdepth 1 -type f \( -name '*.so' -o -name '*.dylib' \) | grep -q .; then
+              echo "Missing Enchant provider modules in ${enchant_modules_dir}"
+              find "${enchant_modules_dir}" -maxdepth 2 -ls 2>/dev/null || true
+              exit 1
+            fi
+
+            while IFS= read -r module; do
+              fix_module_dependencies "${module}" "@loader_path/.."
+            done < <(find "${enchant_modules_dir}" -maxdepth 1 -type f \( -name '*.so' -o -name '*.dylib' \) | sort)
+          else
+            echo "Missing Enchant provider modules directory: ${enchant_modules_dir}"
+            exit 1
+          fi
+
+          for _ in 1 2 3; do
+            while IFS= read -r library; do
+              normalize_bundled_library "${library}"
+            done < <(find "${resources_dir}/lib" -maxdepth 1 -type f -name '*.dylib' | sort)
+          done
+
+          (
+            cd "${resources_dir}"
+
+            if [ -d "lib/gio/modules" ]; then
+              gio-querymodules "lib/gio/modules"
+            fi
+
+            if [ -d "lib/gdk-pixbuf-2.0/2.10.0/loaders" ]; then
+              if ! find "lib/gdk-pixbuf-2.0/2.10.0/loaders" -maxdepth 1 -type f -name '*.so' | grep -q .; then
+                echo "Missing gdk-pixbuf loader modules in ${resources_dir}/lib/gdk-pixbuf-2.0/2.10.0/loaders"
+                find "lib/gdk-pixbuf-2.0" -maxdepth 6 -ls 2>/dev/null || true
+                exit 1
+              fi
+
+              loader_dir="lib/gdk-pixbuf-2.0/2.10.0/loaders"
+              loader_cache="lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
+
+              GDK_PIXBUF_MODULEDIR="${loader_dir}" \
+                gdk-pixbuf-query-loaders "${loader_dir}"/*.so \
+                > "${loader_cache}"
+
+              loader_dir_abs="$(pwd)/${loader_dir}"
+              perl -0pi -e 's#\Q'"${loader_dir_abs}"'\E#'"${loader_dir}"'#g' "${loader_cache}"
+
+              if ! grep -F "libpixbufloader" "${loader_cache}"; then
+                echo "gdk-pixbuf loader cache contains no loader modules"
+                exit 1
+              fi
+            else
+              echo "Missing gdk-pixbuf loaders directory: ${resources_dir}/lib/gdk-pixbuf-2.0/2.10.0/loaders"
+              find "lib/gdk-pixbuf-2.0" -maxdepth 5 -type d 2>/dev/null | sort || true
+              exit 1
+            fi
+          )
+
+          staging_sha="$(git -C "${staging_source_dir}" rev-parse HEAD)"
+          desktop_sha="$(git -C "${desktop_source_dir}" rev-parse HEAD)"
+          artifact_hashes_path="${metadata_dir}/input-artifact-sha256.txt"
+          {
+            find downloads/desktop -type f -print0
+            find downloads/backend -type f -print0
+            find downloads/launcher -type f -print0
+          } | sort -z | xargs -0 shasum -a 256 > "${artifact_hashes_path}"
+
+          HOLDER_VERSION="${version}" \
+          STAGING_SHA="${staging_sha}" \
+          DESKTOP_REPOSITORY="${{ inputs.desktop_repository }}" \
+          DESKTOP_REF="${{ inputs.desktop_ref }}" \
+          DESKTOP_SHA="${desktop_sha}" \
+          DESKTOP_RUN_ID="${{ inputs.desktop_run_id }}" \
+          BACKEND_REPOSITORY="${{ inputs.backend_repository }}" \
+          BACKEND_RUN_ID="${{ inputs.backend_run_id }}" \
+          LAUNCHER_REPOSITORY="${{ inputs.launcher_repository }}" \
+          LAUNCHER_RUN_ID="${{ inputs.launcher_run_id }}" \
+          METADATA_PATH="${metadata_dir}/release-candidate.json" \
+          python3 - <<'PY'
+          import json
+          import os
+          from datetime import datetime, timezone
+
+          metadata = {
+              "platform": "macos",
+              "version": os.environ["HOLDER_VERSION"],
+              "created_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+              "staging_repository": os.environ["GITHUB_REPOSITORY"],
+              "staging_sha": os.environ["STAGING_SHA"],
+              "desktop_repository": os.environ["DESKTOP_REPOSITORY"],
+              "desktop_ref": os.environ["DESKTOP_REF"],
+              "desktop_sha": os.environ["DESKTOP_SHA"],
+              "desktop_run_id": os.environ["DESKTOP_RUN_ID"],
+              "desktop_artifact": "holder-desktop-macos",
+              "backend_repository": os.environ["BACKEND_REPOSITORY"],
+              "backend_run_id": os.environ["BACKEND_RUN_ID"],
+              "backend_artifact": "holder-daemon-macos-backend",
+              "launcher_repository": os.environ["LAUNCHER_REPOSITORY"],
+              "launcher_run_id": os.environ["LAUNCHER_RUN_ID"],
+              "launcher_artifact": "holder-launcher-macos",
+          }
+
+          with open(os.environ["METADATA_PATH"], "w", encoding="utf-8") as f:
+              json.dump(metadata, f, indent=2, sort_keys=True)
+              f.write("\n")
+          PY
+
+          (
+            cd "out/artifacts"
+            find Holder.app -type f \
+              | sort \
+              > Holder.app/Contents/Resources/manifest.txt
+            shasum -a 256 Holder.app/Contents/Resources/manifest.txt \
+              Holder.app/Contents/Resources/release/release-candidate.json \
+              Holder.app/Contents/Resources/release/input-artifact-sha256.txt \
+              > Holder.app/Contents/Resources/release/staging-sha256.txt
+          )
+
+          broken_symlinks=""
+          while IFS= read -r symlink; do
+            if [ ! -e "${symlink}" ]; then
+              broken_symlinks="${broken_symlinks}${symlink}"$'\n'
+            fi
+          done < <(find "${app_dir}" -type l -print)
+          if [ -n "${broken_symlinks}" ]; then
+            echo "Broken symlinks in staged app:"
+            printf '%s' "${broken_symlinks}"
+            exit 1
+          fi
+
+          codesign --force --sign - "${contents_dir}/MacOS/Holder"
+          codesign --force --sign - "${resources_dir}/bin/holder-desktop"
+          codesign --force --sign - "${resources_dir}/bin/holderd"
+          codesign --force --sign - "${resources_dir}/bin/holderctl"
+          codesign --force --sign - "${app_dir}"
+
+          find "${app_dir}" -maxdepth 5 -type f | sort
+
+      - name: Smoke-test Holder.app
+        run: |
+          set -euo pipefail
+
+          app_dir="out/artifacts/Holder.app"
+          resources_dir="${app_dir}/Contents/Resources"
+          homebrew_prefix="$(brew --prefix)"
+
+          check_file() {
+            local path="$1"
+            if [ ! -f "${path}" ]; then
+              echo "Missing file: ${path}"
+              exit 1
+            fi
+          }
+
+          check_executable() {
+            local path="$1"
+            if [ ! -x "${path}" ]; then
+              echo "Missing executable: ${path}"
+              exit 1
+            fi
+          }
+
+          check_no_match() {
+            local pattern="$1"
+            local path="$2"
+            if grep -Fn -- "${pattern}" "${path}"; then
+              echo "Unexpected path leak in ${path}: ${pattern}"
+              exit 1
+            fi
+          }
+
+          check_file "${app_dir}/Contents/Info.plist"
+          check_executable "${app_dir}/Contents/MacOS/Holder"
+          check_executable "${resources_dir}/bin/holder-desktop"
+          check_executable "${resources_dir}/bin/holderd"
+          check_executable "${resources_dir}/bin/holderctl"
+          check_file "${resources_dir}/schema/schema.sql"
+          check_file "${resources_dir}/openapi.yaml"
+          check_file "${resources_dir}/share/glib-2.0/schemas/gschemas.compiled"
+          check_file "${resources_dir}/share/gtksourceview-5/language-specs/language2.rng"
+          check_file "${resources_dir}/share/icons/Adwaita/symbolic/actions/view-refresh-symbolic.svg"
+          check_file "${resources_dir}/share/icons/Adwaita/symbolic/actions/list-add-symbolic.svg"
+          check_file "${resources_dir}/share/icons/Adwaita/symbolic/actions/edit-find-replace-symbolic.svg"
+          check_file "${resources_dir}/share/icons/Adwaita/symbolic/actions/open-menu-symbolic.svg"
+          check_file "${resources_dir}/share/icons/Adwaita/symbolic/places/user-trash-symbolic.svg"
+          check_file "${resources_dir}/share/enchant/hunspell/en_GB.aff"
+          check_file "${resources_dir}/share/enchant/hunspell/en_GB.dic"
+          check_file "${resources_dir}/share/enchant/hunspell/en_US.aff"
+          check_file "${resources_dir}/share/enchant/hunspell/en_US.dic"
+          check_file "${resources_dir}/release/packaging/macos/Holder.entitlements"
+          check_file "${resources_dir}/release/release-candidate.json"
+          check_file "${resources_dir}/release/input-artifact-sha256.txt"
+          check_file "${resources_dir}/release/staging-sha256.txt"
+          check_file "${resources_dir}/manifest.txt"
+
+          if ! find "${resources_dir}/lib/enchant-2" -maxdepth 1 -type f \( -name '*.so' -o -name '*.dylib' \) | grep -q .; then
+            echo "Missing Enchant provider modules in staged app"
+            exit 1
+          fi
+
+          check_file "${resources_dir}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
+          if ! find "${resources_dir}/lib/gdk-pixbuf-2.0/2.10.0/loaders" -maxdepth 1 -type f -name '*.so' | grep -q .; then
+            echo "Missing gdk-pixbuf loader modules in staged app"
+            exit 1
+          fi
+          if ! grep -F "libpixbufloader" "${resources_dir}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"; then
+            echo "gdk-pixbuf loader cache contains no loader modules"
+            exit 1
+          fi
+          if [ -f "${resources_dir}/lib/gio/modules/giomodule.cache" ]; then
+            check_no_match "${app_dir}" "${resources_dir}/lib/gio/modules/giomodule.cache"
+            check_no_match "${homebrew_prefix}" "${resources_dir}/lib/gio/modules/giomodule.cache"
+          fi
+          check_no_match "${app_dir}" "${resources_dir}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
+          check_no_match "${homebrew_prefix}" "${resources_dir}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
+          check_no_match "out/artifacts/Holder.app" "${resources_dir}/manifest.txt"
+
+          for binary in \
+            "${app_dir}/Contents/MacOS/Holder" \
+            "${resources_dir}/bin/holder-desktop" \
+            "${resources_dir}/bin/holderd" \
+            "${resources_dir}/bin/holderctl"; do
+            if otool -L "${binary}" | grep -F "${homebrew_prefix}/"; then
+              echo "${binary} still links to Homebrew paths"
+              exit 1
+            fi
+          done
+
+          while IFS= read -r library; do
+            if otool -L "${library}" | grep -F "${homebrew_prefix}/"; then
+              echo "${library} still links to Homebrew paths"
+              exit 1
+            fi
+            if otool -L "${library}" | grep -E '@executable_path|@loader_path/\.\.'; then
+              echo "${library} has non-library-relative dependency paths"
+              exit 1
+            fi
+          done < <(find "${resources_dir}/lib" -maxdepth 1 -type f -name '*.dylib' | sort)
+
+          while IFS= read -r loader; do
+            if otool -L "${loader}" | grep -F "${homebrew_prefix}/"; then
+              echo "${loader} still links to Homebrew paths"
+              exit 1
+            fi
+          done < <(find "${resources_dir}/lib/gdk-pixbuf-2.0/2.10.0/loaders" -maxdepth 1 -type f -name '*.so' | sort)
+
+          while IFS= read -r module; do
+            if otool -L "${module}" | grep -F "${homebrew_prefix}/"; then
+              echo "${module} still links to Homebrew paths"
+              exit 1
+            fi
+          done < <(find "${resources_dir}/lib/enchant-2" -maxdepth 1 -type f \( -name '*.so' -o -name '*.dylib' \) | sort)
+
+          codesign --verify --strict --verbose=2 "${app_dir}"
+
+          for binary in \
+            "${app_dir}/Contents/MacOS/Holder" \
+            "${resources_dir}/bin/holder-desktop" \
+            "${resources_dir}/bin/holderd" \
+            "${resources_dir}/bin/holderctl"; do
+            codesign --verify --strict --verbose=2 "${binary}"
+          done
+
+          while IFS= read -r signed_file; do
+            codesign --verify --strict --verbose=2 "${signed_file}"
+          done < <(find "${resources_dir}/lib" -type f \( -name '*.dylib' -o -name '*.so' \) | sort)
+
+          echo "Running staged holderd --version"
+          "${resources_dir}/bin/holderd" --version
+          echo "Running staged holderctl --help"
+          "${resources_dir}/bin/holderctl" --help
+
+      - name: Upload staged app
+        uses: actions/upload-artifact@v4
+        with:
+          name: Holder-macos-staged
+          path: out/artifacts
+          if-no-files-found: error
+          retention-days: 7
