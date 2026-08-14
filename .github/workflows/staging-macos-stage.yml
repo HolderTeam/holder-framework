@@ -626,7 +626,62 @@ jobs:
           echo "Running staged holderctl --help"
           "${resources_dir}/bin/holderctl" --help
 
-      - name: Upload staged app
+      - name: Create preview DMG
+        run: |
+          set -euo pipefail
+
+          app_dir="out/artifacts/Holder.app"
+          dmg_root="out/dmg-root"
+          dmg_path="out/artifacts/Holder-macos-staged.dmg"
+
+          rm -rf "${dmg_root}" "${dmg_path}"
+          mkdir -p "${dmg_root}"
+
+          ditto "${app_dir}" "${dmg_root}/Holder.app"
+          ln -s /Applications "${dmg_root}/Applications"
+
+          hdiutil create \
+            -volname "Holder" \
+            -srcfolder "${dmg_root}" \
+            -ov \
+            -format UDZO \
+            "${dmg_path}"
+
+          shasum -a 256 "${dmg_path}" > "${dmg_path}.sha256"
+
+          mount_dir="$(mktemp -d)"
+          hdiutil attach \
+            -readonly \
+            -nobrowse \
+            -mountpoint "${mount_dir}" \
+            "${dmg_path}"
+
+          cleanup() {
+            hdiutil detach "${mount_dir}" -quiet || true
+            rm -rf "${mount_dir}"
+          }
+          trap cleanup EXIT
+
+          if [ ! -d "${mount_dir}/Holder.app" ]; then
+            echo "Preview DMG is missing Holder.app"
+            exit 1
+          fi
+
+          if [ ! -L "${mount_dir}/Applications" ]; then
+            echo "Preview DMG is missing Applications symlink"
+            exit 1
+          fi
+
+          applications_target="$(readlink "${mount_dir}/Applications")"
+          if [ "${applications_target}" != "/Applications" ]; then
+            echo "Applications symlink points to ${applications_target}, expected /Applications"
+            exit 1
+          fi
+
+          cleanup
+          trap - EXIT
+
+      - name: Upload staged app and preview DMG
         uses: actions/upload-artifact@v4
         with:
           name: Holder-macos-staged
