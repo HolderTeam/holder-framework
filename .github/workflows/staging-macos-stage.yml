@@ -630,37 +630,80 @@ jobs:
         run: |
           set -euo pipefail
 
+          volume_name="Holder"
           app_dir="out/artifacts/Holder.app"
           dmg_root="out/dmg-root"
+          tmp_dmg="out/Holder-macos-staged-writable.dmg"
           dmg_path="out/artifacts/Holder-macos-staged.dmg"
+          venv_dir="out/dmg-ds-venv"
+          background_path="sources/holder-staging/mac-images/holder-dmg.png"
+          ds_store_script="sources/holder-staging/scripts/write_dmg_ds_store.py"
 
-          rm -rf "${dmg_root}" "${dmg_path}"
+          rm -rf "${dmg_root}" "${tmp_dmg}" "${dmg_path}" "${dmg_path}.sha256" "${venv_dir}"
           mkdir -p "${dmg_root}"
 
           ditto "${app_dir}" "${dmg_root}/Holder.app"
           ln -s /Applications "${dmg_root}/Applications"
+          cp "${background_path}" "${dmg_root}/.background.png"
 
           hdiutil create \
-            -volname "Holder" \
+            -volname "${volume_name}" \
             -srcfolder "${dmg_root}" \
             -ov \
+            -format UDRW \
+            "${tmp_dmg}"
+
+          python3 -m venv "${venv_dir}"
+          "${venv_dir}/bin/python" -m pip install \
+            biplist \
+            ds_store \
+            mac_alias
+
+          mounted_dir=""
+          mount_dir="$(mktemp -d)"
+          cleanup() {
+            if [ -n "${mounted_dir}" ]; then
+              hdiutil detach "${mounted_dir}" -quiet || true
+              mounted_dir=""
+            fi
+            rm -rf "${mount_dir}"
+          }
+          trap cleanup EXIT
+
+          hdiutil attach \
+            -readwrite \
+            -nobrowse \
+            -mountpoint "${mount_dir}" \
+            "${tmp_dmg}"
+          mounted_dir="${mount_dir}"
+
+          "${venv_dir}/bin/python" "${ds_store_script}" \
+            --mount "${mount_dir}" \
+            --volume-name "${volume_name}"
+
+          sync
+          cleanup
+          trap - EXIT
+
+          hdiutil convert \
+            "${tmp_dmg}" \
             -format UDZO \
-            "${dmg_path}"
+            -imagekey zlib-level=9 \
+            -o "${dmg_path}"
+          rm -f "${tmp_dmg}"
 
           shasum -a 256 "${dmg_path}" > "${dmg_path}.sha256"
 
+          mounted_dir=""
           mount_dir="$(mktemp -d)"
+          trap cleanup EXIT
+
           hdiutil attach \
             -readonly \
             -nobrowse \
             -mountpoint "${mount_dir}" \
             "${dmg_path}"
-
-          cleanup() {
-            hdiutil detach "${mount_dir}" -quiet || true
-            rm -rf "${mount_dir}"
-          }
-          trap cleanup EXIT
+          mounted_dir="${mount_dir}"
 
           if [ ! -d "${mount_dir}/Holder.app" ]; then
             echo "Preview DMG is missing Holder.app"
@@ -675,6 +718,16 @@ jobs:
           applications_target="$(readlink "${mount_dir}/Applications")"
           if [ "${applications_target}" != "/Applications" ]; then
             echo "Applications symlink points to ${applications_target}, expected /Applications"
+            exit 1
+          fi
+
+          if [ ! -f "${mount_dir}/.background.png" ]; then
+            echo "Preview DMG is missing Finder background image"
+            exit 1
+          fi
+
+          if [ ! -f "${mount_dir}/.DS_Store" ]; then
+            echo "Preview DMG is missing Finder layout metadata"
             exit 1
           fi
 
