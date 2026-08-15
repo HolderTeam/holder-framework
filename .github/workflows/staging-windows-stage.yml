@@ -261,25 +261,30 @@ jobs:
           $desktopSourceDir = "sources\holder-desktop"
           $stageDir = (Resolve-Path "out\artifacts\Holder-windows-staged").Path
           $outputDir = (New-Item -ItemType Directory -Force "out\artifacts\windows-unsigned-installer").FullName
+          $scriptDir = (New-Item -ItemType Directory -Force "out\artifacts\windows-unsigned-installer-script").FullName
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 
           if (!(Test-Path $iscc)) {
             throw "Inno Setup compiler not found at $iscc"
           }
 
-          Push-Location $desktopSourceDir
-          try {
-            & $iscc `
-              "/DStageDir=$stageDir" `
-              "/DAppVersion=$env:APP_VERSION" `
-              "/O$outputDir" `
-              "/FHolder-$env:APP_VERSION-Setup-unsigned" `
-              "packaging\windows\Holder.iss"
-            if ($LASTEXITCODE -ne 0) {
-              throw "Inno Setup compiler exited with code $LASTEXITCODE"
-            }
-          } finally {
-            Pop-Location
+          $sourceScript = Join-Path $desktopSourceDir "packaging\windows\Holder.iss"
+          $sourceIcon = (Resolve-Path (Join-Path $desktopSourceDir "packaging\windows\Holder.ico")).Path
+          $scriptPath = Join-Path $scriptDir "Holder.iss"
+
+          $scriptContent = Get-Content $sourceScript -Raw
+          $scriptContent = $scriptContent.Replace("SetupIconFile=packaging\windows\Holder.ico", "SetupIconFile=$sourceIcon")
+          $scriptContent = $scriptContent.Replace('Source: "packaging\windows\Holder.ico"', "Source: `"$sourceIcon`"")
+          $scriptContent | Set-Content -Encoding UTF8 $scriptPath
+
+          & $iscc `
+            "/DStageDir=$stageDir" `
+            "/DAppVersion=$env:APP_VERSION" `
+            "/O$outputDir" `
+            "/FHolder-$env:APP_VERSION-Setup-unsigned" `
+            $scriptPath
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup compiler exited with code $LASTEXITCODE"
           }
 
           $setupExe = Join-Path $outputDir "Holder-$env:APP_VERSION-Setup-unsigned.exe"
@@ -444,21 +449,26 @@ jobs:
             $desktopSourceDir = "sources\holder-desktop"
             $stageDir = (Resolve-Path $testStage).Path
             $outputDir = (Resolve-Path $installerDir).Path
+            $scriptDir = (New-Item -ItemType Directory -Force (Join-Path $testRoot "installer-script")).FullName
             $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 
-            Push-Location $desktopSourceDir
-            try {
-              & $iscc `
-                "/DStageDir=$stageDir" `
-                "/DAppVersion=$env:APP_VERSION" `
-                "/O$outputDir" `
-                "/FHolder-$env:APP_VERSION-Setup-test-signed" `
-                "packaging\windows\Holder.iss"
-              if ($LASTEXITCODE -ne 0) {
-                throw "Inno Setup compiler exited with code $LASTEXITCODE"
-              }
-            } finally {
-              Pop-Location
+            $sourceScript = Join-Path $desktopSourceDir "packaging\windows\Holder.iss"
+            $sourceIcon = (Resolve-Path (Join-Path $desktopSourceDir "packaging\windows\Holder.ico")).Path
+            $scriptPath = Join-Path $scriptDir "Holder.iss"
+
+            $scriptContent = Get-Content $sourceScript -Raw
+            $scriptContent = $scriptContent.Replace("SetupIconFile=packaging\windows\Holder.ico", "SetupIconFile=$sourceIcon")
+            $scriptContent = $scriptContent.Replace('Source: "packaging\windows\Holder.ico"', "Source: `"$sourceIcon`"")
+            $scriptContent | Set-Content -Encoding UTF8 $scriptPath
+
+            & $iscc `
+              "/DStageDir=$stageDir" `
+              "/DAppVersion=$env:APP_VERSION" `
+              "/O$outputDir" `
+              "/FHolder-$env:APP_VERSION-Setup-test-signed" `
+              $scriptPath
+            if ($LASTEXITCODE -ne 0) {
+              throw "Inno Setup compiler exited with code $LASTEXITCODE"
             }
 
             $setupExe = Join-Path $installerDir "Holder-$env:APP_VERSION-Setup-test-signed.exe"
