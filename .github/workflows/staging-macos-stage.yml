@@ -652,12 +652,13 @@ jobs:
           dmg_root="out/dmg-root"
           tmp_dmg="out/Holder-macos-staged-writable.dmg"
           dmg_path="out/artifacts/Holder-macos-staged.dmg"
+          layout_dir="out/artifacts/dmg-layout"
           venv_dir="out/dmg-ds-venv"
           background_path="sources/holder-staging/mac-images/holder-dmg.png"
           ds_store_script="sources/holder-staging/scripts/write_dmg_ds_store.py"
 
-          rm -rf "${dmg_root}" "${tmp_dmg}" "${dmg_path}" "${dmg_path}.sha256" "${venv_dir}"
-          mkdir -p "${dmg_root}"
+          rm -rf "${dmg_root}" "${tmp_dmg}" "${dmg_path}" "${dmg_path}.sha256" "${layout_dir}" "${venv_dir}"
+          mkdir -p "${dmg_root}" "${layout_dir}"
 
           ditto "${app_dir}" "${dmg_root}/Holder.app"
           ln -s /Applications "${dmg_root}/Applications"
@@ -697,6 +698,14 @@ jobs:
           "${venv_dir}/bin/python" "${ds_store_script}" \
             --mount "${mount_dir}" \
             --volume-name "${volume_name}"
+
+          cp "${mount_dir}/.DS_Store" "${layout_dir}/DS_Store"
+          cp "${mount_dir}/.background.png" "${layout_dir}/background.png"
+          printf '%s\n' "${volume_name}" > "${layout_dir}/volume-name.txt"
+          (
+            cd "${layout_dir}"
+            shasum -a 256 DS_Store background.png volume-name.txt > sha256.txt
+          )
 
           sync
           cleanup
@@ -747,6 +756,11 @@ jobs:
             echo "Preview DMG is missing Finder layout metadata"
             exit 1
           fi
+
+          (
+            cd "${layout_dir}"
+            shasum -a 256 -c sha256.txt
+          )
 
           cleanup
           trap - EXIT
