@@ -142,6 +142,22 @@ jobs:
           cp "${desktop_source_dir}/packaging/macos/Holder.entitlements" \
             "${metadata_dir}/packaging/macos/Holder.entitlements"
 
+          icon_source="${desktop_source_dir}/packaging/icons/holder1024.png"
+          iconset_dir="${RUNNER_TEMP}/Holder.iconset"
+          rm -rf "${iconset_dir}"
+          mkdir -p "${iconset_dir}"
+          sips -z 16 16 "${icon_source}" --out "${iconset_dir}/icon_16x16.png" >/dev/null
+          sips -z 32 32 "${icon_source}" --out "${iconset_dir}/icon_16x16@2x.png" >/dev/null
+          sips -z 32 32 "${icon_source}" --out "${iconset_dir}/icon_32x32.png" >/dev/null
+          sips -z 64 64 "${icon_source}" --out "${iconset_dir}/icon_32x32@2x.png" >/dev/null
+          sips -z 128 128 "${icon_source}" --out "${iconset_dir}/icon_128x128.png" >/dev/null
+          sips -z 256 256 "${icon_source}" --out "${iconset_dir}/icon_128x128@2x.png" >/dev/null
+          sips -z 256 256 "${icon_source}" --out "${iconset_dir}/icon_256x256.png" >/dev/null
+          sips -z 512 512 "${icon_source}" --out "${iconset_dir}/icon_256x256@2x.png" >/dev/null
+          sips -z 512 512 "${icon_source}" --out "${iconset_dir}/icon_512x512.png" >/dev/null
+          cp "${icon_source}" "${iconset_dir}/icon_512x512@2x.png"
+          iconutil -c icns -o "${resources_dir}/Holder.icns" "${iconset_dir}"
+
           cp downloads/launcher/Holder "${contents_dir}/MacOS/Holder"
           cp downloads/desktop/bin/holder-desktop "${resources_dir}/bin/holder-desktop"
           cp downloads/backend/bin/holderd "${resources_dir}/bin/holderd"
@@ -526,6 +542,7 @@ jobs:
           }
 
           check_file "${app_dir}/Contents/Info.plist"
+          check_file "${resources_dir}/Holder.icns"
           check_executable "${app_dir}/Contents/MacOS/Holder"
           check_executable "${resources_dir}/bin/holder-desktop"
           check_executable "${resources_dir}/bin/holderd"
