@@ -1,0 +1,544 @@
+name: Windows staged package
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktop_run_id:
+        description: GitHub Actions run ID that uploaded holder-desktop-windows
+        required: true
+        type: string
+      backend_run_id:
+        description: GitHub Actions run ID that uploaded holder-daemon-windows-backend
+        required: true
+        type: string
+      launcher_run_id:
+        description: GitHub Actions run ID that uploaded holder-launcher-windows
+        required: true
+        type: string
+      desktop_repository:
+        description: Repository containing the desktop artifact and packaging metadata
+        required: true
+        type: string
+        default: HolderTeam/holder-desktop
+      desktop_ref:
+        description: holder-desktop ref to read VERSION and Windows packaging templates from
+        required: true
+        type: string
+        default: master
+      backend_repository:
+        description: Repository containing the backend artifact
+        required: true
+        type: string
+        default: HolderTeam/holder-daemon
+      launcher_repository:
+        description: Repository containing the launcher artifact
+        required: true
+        type: string
+        default: HolderTeam/holder-launcher
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  stage:
+    runs-on: windows-latest
+    environment: windows-staging
+
+    steps:
+      - name: Check out holder-staging
+        uses: actions/checkout@v4
+        with:
+          path: sources/holder-staging
+
+      - name: Check out holder-desktop metadata
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.desktop_repository }}
+          ref: ${{ inputs.desktop_ref }}
+          token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          path: sources/holder-desktop
+
+      - name: Download desktop artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: holder-desktop-windows
+          path: downloads/desktop
+          github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          repository: ${{ inputs.desktop_repository }}
+          run-id: ${{ inputs.desktop_run_id }}
+
+      - name: Download backend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: holder-daemon-windows-backend
+          path: downloads/backend
+          github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          repository: ${{ inputs.backend_repository }}
+          run-id: ${{ inputs.backend_run_id }}
+
+      - name: Download launcher artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: holder-launcher-windows
+          path: downloads/launcher
+          github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          repository: ${{ inputs.launcher_repository }}
+          run-id: ${{ inputs.launcher_run_id }}
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup --yes --no-progress
+
+      - name: Assemble unsigned staged package
+        shell: pwsh
+        env:
+          BACKEND_REPOSITORY: ${{ inputs.backend_repository }}
+          BACKEND_RUN_ID: ${{ inputs.backend_run_id }}
+          DESKTOP_REPOSITORY: ${{ inputs.desktop_repository }}
+          DESKTOP_REF: ${{ inputs.desktop_ref }}
+          DESKTOP_RUN_ID: ${{ inputs.desktop_run_id }}
+          LAUNCHER_REPOSITORY: ${{ inputs.launcher_repository }}
+          LAUNCHER_RUN_ID: ${{ inputs.launcher_run_id }}
+          STAGING_REPOSITORY: ${{ github.repository }}
+          STAGING_RUN_ID: ${{ github.run_id }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $desktopSourceDir = "sources\holder-desktop"
+          $desktopDir = "downloads\desktop"
+          $backendDir = "downloads\backend"
+          $launcherDir = "downloads\launcher"
+          $stageDir = "out\artifacts\Holder-windows-staged"
+
+          if (Test-Path $stageDir) {
+            Remove-Item $stageDir -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Force $stageDir | Out-Null
+          Copy-Item "$desktopDir\*" -Destination $stageDir -Recurse -Force
+          Copy-Item "$launcherDir\Holder.exe" -Destination $stageDir -Force
+
+          $binDir = Join-Path $stageDir "bin"
+          New-Item -ItemType Directory -Force $binDir | Out-Null
+
+          Copy-Item "$backendDir\holderd.exe", "$backendDir\holderctl.exe" -Destination $binDir -Force
+          Get-ChildItem $backendDir -Filter "*.dll" | Copy-Item -Destination $binDir -Force
+
+          foreach ($runtimeDir in @("schema", "config", "assets")) {
+            $source = Join-Path $backendDir $runtimeDir
+            if (Test-Path $source) {
+              Copy-Item $source -Destination $stageDir -Recurse -Force
+            }
+          }
+
+          $openapi = Join-Path $backendDir "openapi.yaml"
+          if (Test-Path $openapi) {
+            Copy-Item $openapi -Destination $stageDir -Force
+          }
+
+          $releaseDir = Join-Path $stageDir "release"
+          $packagingDir = Join-Path $releaseDir "packaging\windows"
+          New-Item -ItemType Directory -Force $packagingDir | Out-Null
+          Copy-Item "$desktopSourceDir\packaging\windows\Holder.iss" -Destination $packagingDir -Force
+          Copy-Item "$desktopSourceDir\packaging\windows\Holder.ico" -Destination $packagingDir -Force
+
+          $version = (Get-Content "$desktopSourceDir\VERSION" -Raw).Trim()
+          $metadataPath = Join-Path $releaseDir "release-candidate.json"
+          $metadata = [ordered]@{
+            backend_artifact = "holder-daemon-windows-backend"
+            backend_repository = $env:BACKEND_REPOSITORY
+            backend_run_id = $env:BACKEND_RUN_ID
+            created_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss'Z'")
+            desktop_artifact = "holder-desktop-windows"
+            desktop_ref = $env:DESKTOP_REF
+            desktop_repository = $env:DESKTOP_REPOSITORY
+            desktop_run_id = $env:DESKTOP_RUN_ID
+            launcher_artifact = "holder-launcher-windows"
+            launcher_repository = $env:LAUNCHER_REPOSITORY
+            launcher_run_id = $env:LAUNCHER_RUN_ID
+            platform = "windows"
+            staging_artifact = "Holder-windows-staged"
+            staging_repository = $env:STAGING_REPOSITORY
+            staging_run_id = $env:STAGING_RUN_ID
+            version = $version
+          }
+          $metadata | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 $metadataPath
+
+          $root = (Resolve-Path $stageDir).Path
+          Get-ChildItem $stageDir -Recurse -File |
+            ForEach-Object { $_.FullName.Substring($root.Length + 1).Replace("\", "/") } |
+            Sort-Object |
+            Set-Content -Encoding UTF8 (Join-Path $stageDir "manifest.txt")
+
+          Get-ChildItem $stageDir -Recurse -File |
+            ForEach-Object {
+              $relative = $_.FullName.Substring($root.Length + 1).Replace("\", "/")
+              $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+              "$hash  $relative"
+            } |
+            Sort-Object |
+            Set-Content -Encoding UTF8 (Join-Path $releaseDir "input-artifact-sha256.txt")
+
+          Get-ChildItem $stageDir -Recurse -File |
+            Where-Object { $_.FullName -notlike "*\release\staging-sha256.txt" } |
+            ForEach-Object {
+              $relative = $_.FullName.Substring($root.Length + 1).Replace("\", "/")
+              $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+              "$hash  $relative"
+            } |
+            Sort-Object |
+            Set-Content -Encoding UTF8 (Join-Path $releaseDir "staging-sha256.txt")
+
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          Get-ChildItem $stageDir -Recurse -File |
+            Select-Object FullName, Length |
+            Sort-Object FullName
+
+      - name: Smoke-test unsigned staged package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $stageDir = "out\artifacts\Holder-windows-staged"
+          $requiredFiles = @(
+            "Holder.exe",
+            "bin\holder-desktop.exe",
+            "bin\holderd.exe",
+            "bin\holderctl.exe",
+            "share\glib-2.0\schemas\gschemas.compiled",
+            "share\glib-2.0\schemas\team.holder.Holder.gschema.xml",
+            "share\gtksourceview-5\language-specs\language2.rng",
+            "lib\gio\modules\giomodule.cache",
+            "lib\gdk-pixbuf-2.0\2.10.0\loaders.cache",
+            "schema\schema.sql",
+            "openapi.yaml",
+            "manifest.txt",
+            "release\release-candidate.json",
+            "release\input-artifact-sha256.txt",
+            "release\staging-sha256.txt",
+            "release\packaging\windows\Holder.iss",
+            "release\packaging\windows\Holder.ico"
+          )
+
+          foreach ($file in $requiredFiles) {
+            $path = Join-Path $stageDir $file
+            if (!(Test-Path $path)) {
+              throw "Missing staged file: $file"
+            }
+          }
+
+          $loaderCache = Join-Path $stageDir "lib\gdk-pixbuf-2.0\2.10.0\loaders.cache"
+          if (Select-String -Path $loaderCache -Pattern "D:/a/|out/artifacts/windows-desktop|/ucrt64" -Quiet) {
+            throw "GDK Pixbuf loader cache contains a build-machine path"
+          }
+
+          $manifest = Join-Path $stageDir "manifest.txt"
+          if (Select-String -Path $manifest -Pattern "out/artifacts/windows-desktop|out/artifacts/Holder-windows-staged" -Quiet) {
+            throw "Manifest contains a staging path"
+          }
+
+          $metadata = Get-Content (Join-Path $stageDir "release\release-candidate.json") -Raw | ConvertFrom-Json
+          if ($metadata.platform -ne "windows") {
+            throw "release-candidate.json platform is not windows"
+          }
+          if ($metadata.staging_repository -ne "${{ github.repository }}") {
+            throw "release-candidate.json staging_repository does not match"
+          }
+
+          Push-Location $stageDir
+          & ".\bin\holderd.exe" --help
+          & ".\bin\holderd.exe" --version
+          & ".\bin\holderctl.exe" --help
+          Pop-Location
+
+      - name: Build unsigned installer for smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $desktopSourceDir = "sources\holder-desktop"
+          $stageDir = (Resolve-Path "out\artifacts\Holder-windows-staged").Path
+          $outputDir = (New-Item -ItemType Directory -Force "out\artifacts\windows-unsigned-installer").FullName
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+
+          if (!(Test-Path $iscc)) {
+            throw "Inno Setup compiler not found at $iscc"
+          }
+
+          Push-Location $desktopSourceDir
+          try {
+            & $iscc `
+              "/DStageDir=$stageDir" `
+              "/DAppVersion=$env:APP_VERSION" `
+              "/O$outputDir" `
+              "/FHolder-$env:APP_VERSION-Setup-unsigned" `
+              "packaging\windows\Holder.iss"
+            if ($LASTEXITCODE -ne 0) {
+              throw "Inno Setup compiler exited with code $LASTEXITCODE"
+            }
+          } finally {
+            Pop-Location
+          }
+
+          $setupExe = Join-Path $outputDir "Holder-$env:APP_VERSION-Setup-unsigned.exe"
+          if (!(Test-Path $setupExe)) {
+            throw "Unsigned installer was not created: $setupExe"
+          }
+
+          "UNSIGNED_SETUP_EXE=$setupExe" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Smoke-test unsigned installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $installDir = (New-Item -ItemType Directory -Force "out\installer-smoke\Holder-unsigned").FullName
+          $logPath = Join-Path (Resolve-Path "out\installer-smoke").Path "unsigned-install.log"
+
+          $process = Start-Process `
+            -FilePath $env:UNSIGNED_SETUP_EXE `
+            -ArgumentList @(
+              "/VERYSILENT",
+              "/SUPPRESSMSGBOXES",
+              "/NORESTART",
+              "/DIR=$installDir",
+              "/LOG=$logPath"
+            ) `
+            -Wait `
+            -PassThru
+
+          if ($process.ExitCode -ne 0) {
+            Get-Content $logPath -ErrorAction SilentlyContinue
+            throw "Unsigned installer exited with code $($process.ExitCode)"
+          }
+
+          foreach ($file in @("Holder.exe", "bin\holder-desktop.exe", "bin\holderd.exe", "bin\holderctl.exe", "schema\schema.sql", "openapi.yaml")) {
+            $path = Join-Path $installDir $file
+            if (!(Test-Path $path)) {
+              throw "Unsigned installer missing installed file: $file"
+            }
+          }
+
+          & (Join-Path $installDir "bin\holderd.exe") --version
+          & (Join-Path $installDir "bin\holderctl.exe") --help
+
+          $uninstaller = Join-Path $installDir "unins000.exe"
+          if (Test-Path $uninstaller) {
+            Start-Process `
+              -FilePath $uninstaller `
+              -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") `
+              -Wait
+          }
+
+      - name: Build self-signed tester package
+        shell: pwsh
+        env:
+          WINDOWS_TEST_SIGNING_PFX: ${{ secrets.WINDOWS_TEST_SIGNING_PFX }}
+          WINDOWS_TEST_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_TEST_SIGNING_PFX_PASSWORD }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_TEST_SIGNING_PFX)) {
+            throw "WINDOWS_TEST_SIGNING_PFX is not set"
+          }
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_TEST_SIGNING_PFX_PASSWORD)) {
+            throw "WINDOWS_TEST_SIGNING_PFX_PASSWORD is not set"
+          }
+
+          $testRoot = "out\artifacts\windows-test-signed"
+          $testStage = Join-Path $testRoot "Holder-windows-test-signed"
+          $installerDir = Join-Path $testRoot "installer"
+          $certDir = Join-Path $testRoot "certificate"
+
+          if (Test-Path $testRoot) {
+            Remove-Item $testRoot -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Force $testStage, $installerDir, $certDir | Out-Null
+          Copy-Item "out\artifacts\Holder-windows-staged\*" -Destination $testStage -Recurse -Force
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP "holder-test-signing.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_TEST_SIGNING_PFX))
+
+          try {
+            $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Recurse -Filter signtool.exe |
+              Where-Object { $_.FullName -match "\\x64\\signtool\.exe$" } |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1 -ExpandProperty FullName
+
+            if (!$signtool) {
+              throw "Microsoft signtool.exe not found"
+            }
+
+            $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
+              $pfxPath,
+              $env:WINDOWS_TEST_SIGNING_PFX_PASSWORD,
+              [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::EphemeralKeySet
+            )
+            $certPath = Join-Path $certDir "Holder-windows-test-signing.cer"
+            [IO.File]::WriteAllBytes($certPath, $certificate.Export([System.Security.Cryptography.X509Certificates.X509ContentType]::Cert))
+            "SHA256: $($certificate.GetCertHashString([System.Security.Cryptography.HashAlgorithmName]::SHA256))" |
+              Set-Content -Encoding UTF8 (Join-Path $certDir "Holder-windows-test-signing-fingerprint.txt")
+            "Subject: $($certificate.Subject)" |
+              Add-Content -Encoding UTF8 (Join-Path $certDir "Holder-windows-test-signing-fingerprint.txt")
+
+            $files = @(
+              (Join-Path $testStage "Holder.exe"),
+              (Join-Path $testStage "bin\holder-desktop.exe"),
+              (Join-Path $testStage "bin\holderd.exe"),
+              (Join-Path $testStage "bin\holderctl.exe")
+            )
+
+            foreach ($file in $files) {
+              if (!(Test-Path $file)) {
+                throw "Cannot sign missing test file: $file"
+              }
+
+              & $signtool sign `
+                -f $pfxPath `
+                -fd SHA256 `
+                -tr http://timestamp.digicert.com `
+                -td SHA256 `
+                -p $env:WINDOWS_TEST_SIGNING_PFX_PASSWORD `
+                $file
+              if ($LASTEXITCODE -ne 0) {
+                throw "signtool failed for $file with code $LASTEXITCODE"
+              }
+            }
+
+            $testReleaseDir = Join-Path $testStage "release"
+            $testSigningMetadata = [ordered]@{
+              certificate_sha256 = $certificate.GetCertHashString([System.Security.Cryptography.HashAlgorithmName]::SHA256)
+              certificate_subject = $certificate.Subject
+              note = "Self-signed tester build. Do not use as the canonical release signing input."
+              signed_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss'Z'")
+              signed_files = @(
+                "Holder.exe",
+                "bin/holder-desktop.exe",
+                "bin/holderd.exe",
+                "bin/holderctl.exe"
+              )
+            }
+            $testSigningMetadata |
+              ConvertTo-Json -Depth 4 |
+              Set-Content -Encoding UTF8 (Join-Path $testReleaseDir "test-signing-result.json")
+
+            $testRootPath = (Resolve-Path $testStage).Path
+            Get-ChildItem $testStage -Recurse -File |
+              ForEach-Object { $_.FullName.Substring($testRootPath.Length + 1).Replace("\", "/") } |
+              Sort-Object |
+              Set-Content -Encoding UTF8 (Join-Path $testStage "manifest.txt")
+
+            Get-ChildItem $testStage -Recurse -File |
+              Where-Object { $_.FullName -notlike "*\release\staging-sha256.txt" } |
+              ForEach-Object {
+                $relative = $_.FullName.Substring($testRootPath.Length + 1).Replace("\", "/")
+                $hash = (Get-FileHash -Algorithm SHA256 $_.FullName).Hash.ToLowerInvariant()
+                "$hash  $relative"
+              } |
+              Sort-Object |
+              Set-Content -Encoding UTF8 (Join-Path $testReleaseDir "staging-sha256.txt")
+
+            $desktopSourceDir = "sources\holder-desktop"
+            $stageDir = (Resolve-Path $testStage).Path
+            $outputDir = (Resolve-Path $installerDir).Path
+            $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+
+            Push-Location $desktopSourceDir
+            try {
+              & $iscc `
+                "/DStageDir=$stageDir" `
+                "/DAppVersion=$env:APP_VERSION" `
+                "/O$outputDir" `
+                "/FHolder-$env:APP_VERSION-Setup-test-signed" `
+                "packaging\windows\Holder.iss"
+              if ($LASTEXITCODE -ne 0) {
+                throw "Inno Setup compiler exited with code $LASTEXITCODE"
+              }
+            } finally {
+              Pop-Location
+            }
+
+            $setupExe = Join-Path $installerDir "Holder-$env:APP_VERSION-Setup-test-signed.exe"
+            if (!(Test-Path $setupExe)) {
+              throw "Self-signed test installer was not created: $setupExe"
+            }
+
+            & $signtool sign `
+              -f $pfxPath `
+              -fd SHA256 `
+              -tr http://timestamp.digicert.com `
+              -td SHA256 `
+              -p $env:WINDOWS_TEST_SIGNING_PFX_PASSWORD `
+              $setupExe
+            if ($LASTEXITCODE -ne 0) {
+              throw "signtool failed for $setupExe with code $LASTEXITCODE"
+            }
+
+            "TEST_SIGNED_SETUP_EXE=$setupExe" | Out-File -FilePath $env:GITHUB_ENV -Append
+          } finally {
+            Remove-Item $pfxPath -Force -ErrorAction SilentlyContinue
+          }
+
+      - name: Smoke-test self-signed tester installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $installDir = (New-Item -ItemType Directory -Force "out\installer-smoke\Holder-test-signed").FullName
+          $logPath = Join-Path (Resolve-Path "out\installer-smoke").Path "test-signed-install.log"
+
+          $process = Start-Process `
+            -FilePath $env:TEST_SIGNED_SETUP_EXE `
+            -ArgumentList @(
+              "/VERYSILENT",
+              "/SUPPRESSMSGBOXES",
+              "/NORESTART",
+              "/DIR=$installDir",
+              "/LOG=$logPath"
+            ) `
+            -Wait `
+            -PassThru
+
+          if ($process.ExitCode -ne 0) {
+            Get-Content $logPath -ErrorAction SilentlyContinue
+            throw "Self-signed test installer exited with code $($process.ExitCode)"
+          }
+
+          foreach ($file in @("Holder.exe", "bin\holder-desktop.exe", "bin\holderd.exe", "bin\holderctl.exe", "schema\schema.sql", "openapi.yaml")) {
+            $path = Join-Path $installDir $file
+            if (!(Test-Path $path)) {
+              throw "Self-signed installer missing installed file: $file"
+            }
+          }
+
+          & (Join-Path $installDir "bin\holderd.exe") --version
+          & (Join-Path $installDir "bin\holderctl.exe") --help
+
+          $uninstaller = Join-Path $installDir "unins000.exe"
+          if (Test-Path $uninstaller) {
+            Start-Process `
+              -FilePath $uninstaller `
+              -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") `
+              -Wait
+          }
+
+      - name: Upload unsigned staged package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Holder-windows-staged
+          path: out/artifacts/Holder-windows-staged/**
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload self-signed tester installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Holder-windows-test-signed-installer
+          path: |
+            out/artifacts/windows-test-signed/installer/*.exe
+            out/artifacts/windows-test-signed/certificate/*
+          if-no-files-found: error
+          retention-days: 7
