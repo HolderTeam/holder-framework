@@ -18,7 +18,7 @@ on:
         type: string
         default: Holder-windows-test-signed-installer
       release_tag:
-        description: Optional release tag. Defaults to holder-windows-dev-<staging_run_id>.
+        description: Optional real release tag, for example v0.1.7. Do not use GitHub's untagged-* draft placeholder. Defaults to holder-windows-dev-<staging_run_id>.
         required: false
         type: string
 
@@ -74,6 +74,11 @@ jobs:
           if [ -z "${release_tag}" ]; then
             release_tag="holder-windows-dev-${STAGING_RUN_ID}"
           fi
+          if [[ "${release_tag}" == untagged-* ]]; then
+            echo "release_tag must be a real Git tag, not GitHub's temporary draft-release placeholder: ${release_tag}"
+            echo "Edit the draft release in GitHub and assign a real tag such as v${version}, then rerun this workflow with that tag."
+            exit 1
+          fi
 
           asset_name="Holder-windows-${version}-dev-Setup.exe"
           cp "${installer}" "${payload_dir}/${asset_name}"
@@ -127,6 +132,7 @@ jobs:
       - name: Create or update Windows dev prerelease
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
 
@@ -134,18 +140,21 @@ jobs:
           notes="${payload_dir}/release-notes.md"
           mapfile -t assets < <(find "${payload_dir}" -maxdepth 1 -type f ! -name 'release-notes.md' | sort)
 
-          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+          if gh release view "${RELEASE_TAG}" --repo "${RELEASE_REPOSITORY}" >/dev/null 2>&1; then
             echo "Updating existing prerelease ${RELEASE_TAG}"
             gh release edit "${RELEASE_TAG}" \
+              --repo "${RELEASE_REPOSITORY}" \
               --title "${RELEASE_TITLE}" \
               --notes-file "${notes}" \
               --prerelease
             gh release upload "${RELEASE_TAG}" \
+              --repo "${RELEASE_REPOSITORY}" \
               --clobber \
               "${assets[@]}"
           else
             echo "Creating prerelease ${RELEASE_TAG}"
             gh release create "${RELEASE_TAG}" \
+              --repo "${RELEASE_REPOSITORY}" \
               --prerelease \
               --title "${RELEASE_TITLE}" \
               --notes-file "${notes}" \
