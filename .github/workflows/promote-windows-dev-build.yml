@@ -1,0 +1,153 @@
+name: Promote Windows dev build
+
+on:
+  workflow_dispatch:
+    inputs:
+      staging_run_id:
+        description: holder-staging run ID that uploaded the Windows tester installer
+        required: true
+        type: string
+      staging_repository:
+        description: Repository containing the Windows staging artifact
+        required: true
+        type: string
+        default: HolderTeam/holder-staging
+      staging_artifact_name:
+        description: Name of the Windows tester installer artifact
+        required: true
+        type: string
+        default: Holder-windows-test-signed-installer
+      release_tag:
+        description: Optional release tag. Defaults to holder-windows-dev-<staging_run_id>.
+        required: false
+        type: string
+
+run-name: Promote Windows dev build from staging run ${{ inputs.staging_run_id }}
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Windows tester installer
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.staging_artifact_name }}
+          path: downloads/windows-dev
+          github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          repository: ${{ inputs.staging_repository }}
+          run-id: ${{ inputs.staging_run_id }}
+
+      - name: Prepare release payload
+        env:
+          RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
+          STAGING_ARTIFACT_NAME: ${{ inputs.staging_artifact_name }}
+          STAGING_REPOSITORY: ${{ inputs.staging_repository }}
+          STAGING_RUN_ID: ${{ inputs.staging_run_id }}
+        run: |
+          set -euo pipefail
+
+          input_dir="downloads/windows-dev"
+          payload_dir="out/release-payload"
+          mkdir -p "${payload_dir}"
+
+          installer="$(find "${input_dir}" -type f -name 'Holder-*-Setup-test-signed.exe' | sort | head -n 1)"
+          if [ -z "${installer}" ]; then
+            echo "Could not find Holder-*-Setup-test-signed.exe in ${input_dir}"
+            find "${input_dir}" -type f -print | sort
+            exit 1
+          fi
+
+          installer_name="$(basename "${installer}")"
+          version="${installer_name#Holder-}"
+          version="${version%-Setup-test-signed.exe}"
+          if [ -z "${version}" ] || [ "${version}" = "${installer_name}" ]; then
+            echo "Could not infer Holder version from ${installer_name}"
+            exit 1
+          fi
+
+          release_tag="${RELEASE_TAG_INPUT}"
+          if [ -z "${release_tag}" ]; then
+            release_tag="holder-windows-dev-${STAGING_RUN_ID}"
+          fi
+
+          asset_name="Holder-windows-${version}-dev-Setup.exe"
+          cp "${installer}" "${payload_dir}/${asset_name}"
+
+          cert_path="$(find "${input_dir}" -type f -name 'Holder-windows-test-signing.cer' | sort | head -n 1)"
+          fingerprint_path="$(find "${input_dir}" -type f -name 'Holder-windows-test-signing-fingerprint.txt' | sort | head -n 1)"
+
+          if [ -n "${cert_path}" ]; then
+            cp "${cert_path}" "${payload_dir}/Holder-windows-dev-test-signing.cer"
+          fi
+          if [ -n "${fingerprint_path}" ]; then
+            cp "${fingerprint_path}" "${payload_dir}/Holder-windows-dev-test-signing-fingerprint.txt"
+          fi
+
+          (
+            cd "${payload_dir}"
+            shasum -a 256 "${asset_name}" > "${asset_name}.sha256"
+          )
+
+          {
+            echo "# Holder ${version} Windows dev build"
+            echo
+            echo "This is a Windows development build promoted from Holder's public staging pipeline."
+            echo
+            echo "It is useful for testing the current Windows installer, but it is not the final Windows release-signing path."
+            echo
+            echo "## Windows"
+            echo
+            echo "- Asset: \`${asset_name}\`"
+            echo "- SHA-256: \`$(cut -d ' ' -f 1 "${payload_dir}/${asset_name}.sha256")\`"
+            echo "- Staging run: \`${STAGING_REPOSITORY}#${STAGING_RUN_ID}\`"
+            echo "- Staging artifact: \`${STAGING_ARTIFACT_NAME}\`"
+            echo
+            echo "## Trust notes"
+            echo
+            echo "This installer is a development build. Windows may show SmartScreen or unknown-publisher warnings."
+            echo
+            echo "The installer is self-signed for testing. If a test certificate and fingerprint are attached to this release, only trust that certificate after checking the fingerprint matches the release asset."
+            echo
+            echo "This release is marked as a GitHub prerelease."
+          } > "${payload_dir}/release-notes.md"
+
+          {
+            echo "RELEASE_VERSION=${version}"
+            echo "RELEASE_TAG=${release_tag}"
+            echo "RELEASE_TITLE=Holder ${version} Windows dev build"
+          } >> "${GITHUB_ENV}"
+
+          find "${payload_dir}" -maxdepth 1 -type f -print | sort
+
+      - name: Create or update Windows dev prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          payload_dir="out/release-payload"
+          notes="${payload_dir}/release-notes.md"
+          mapfile -t assets < <(find "${payload_dir}" -maxdepth 1 -type f ! -name 'release-notes.md' | sort)
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Updating existing prerelease ${RELEASE_TAG}"
+            gh release edit "${RELEASE_TAG}" \
+              --title "${RELEASE_TITLE}" \
+              --notes-file "${notes}" \
+              --prerelease
+            gh release upload "${RELEASE_TAG}" \
+              --clobber \
+              "${assets[@]}"
+          else
+            echo "Creating prerelease ${RELEASE_TAG}"
+            gh release create "${RELEASE_TAG}" \
+              --prerelease \
+              --title "${RELEASE_TITLE}" \
+              --notes-file "${notes}" \
+              "${assets[@]}"
+          fi
