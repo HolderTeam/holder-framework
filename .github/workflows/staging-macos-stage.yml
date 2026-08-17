@@ -99,6 +99,7 @@ jobs:
             libspelling \
             libgee \
             libsoup \
+            glib-networking \
             json-glib \
             vte3 \
             boost \
@@ -121,6 +122,7 @@ jobs:
           homebrew_prefix="$(brew --prefix)"
           homebrew_enchant_prefix="$(brew --prefix enchant)"
           homebrew_gdk_pixbuf_prefix="$(brew --prefix gdk-pixbuf)"
+          homebrew_glib_networking_prefix="$(brew --prefix glib-networking)"
           homebrew_gtksourceview_prefix="$(brew --prefix gtksourceview5)"
           homebrew_openssl_prefix="$(brew --prefix openssl@3)"
           app_dir="out/artifacts/Holder.app"
@@ -349,6 +351,7 @@ jobs:
               --sign - "${module}"
           }
 
+          copy_tree_dereference_if_exists "${homebrew_glib_networking_prefix}/lib/gio" "${resources_dir}/lib/gio"
           copy_tree_dereference_if_exists "${homebrew_prefix}/lib/gio" "${resources_dir}/lib/gio"
           copy_tree_dereference_if_exists "${homebrew_enchant_prefix}/lib/enchant-2" "${resources_dir}/lib/enchant-2"
           copy_tree_dereference_if_exists "${homebrew_prefix}/lib/enchant-2" "${resources_dir}/lib/enchant-2"
@@ -387,6 +390,22 @@ jobs:
             exit 1
           fi
 
+          gio_modules_dir="${resources_dir}/lib/gio/modules"
+          if [ -d "${gio_modules_dir}" ]; then
+            if ! find "${gio_modules_dir}" -maxdepth 1 -type f \( -name '*tls*.so' -o -name '*gnutls*.so' -o -name '*tls*.dylib' -o -name '*gnutls*.dylib' \) | grep -q .; then
+              echo "Missing GIO TLS module in ${gio_modules_dir}"
+              find "${gio_modules_dir}" -maxdepth 2 -ls 2>/dev/null || true
+              exit 1
+            fi
+
+            while IFS= read -r module; do
+              fix_module_dependencies "${module}" "@loader_path/../.."
+            done < <(find "${gio_modules_dir}" -maxdepth 1 -type f \( -name '*.so' -o -name '*.dylib' \) | sort)
+          else
+            echo "Missing GIO modules directory: ${gio_modules_dir}"
+            exit 1
+          fi
+
           for _ in 1 2 3; do
             while IFS= read -r library; do
               normalize_bundled_library "${library}"
@@ -398,6 +417,9 @@ jobs:
 
             if [ -d "lib/gio/modules" ]; then
               gio-querymodules "lib/gio/modules"
+            else
+              echo "Missing GIO modules directory: ${resources_dir}/lib/gio/modules"
+              exit 1
             fi
 
             if [ -d "lib/gdk-pixbuf-2.0/2.10.0/loaders" ]; then
@@ -580,10 +602,13 @@ jobs:
             echo "gdk-pixbuf loader cache contains no loader modules"
             exit 1
           fi
-          if [ -f "${resources_dir}/lib/gio/modules/giomodule.cache" ]; then
-            check_no_match "${app_dir}" "${resources_dir}/lib/gio/modules/giomodule.cache"
-            check_no_match "${homebrew_prefix}" "${resources_dir}/lib/gio/modules/giomodule.cache"
+          check_file "${resources_dir}/lib/gio/modules/giomodule.cache"
+          if ! find "${resources_dir}/lib/gio/modules" -maxdepth 1 -type f \( -name '*tls*.so' -o -name '*gnutls*.so' -o -name '*tls*.dylib' -o -name '*gnutls*.dylib' \) | grep -q .; then
+            echo "Missing GIO TLS module in staged app"
+            exit 1
           fi
+          check_no_match "${app_dir}" "${resources_dir}/lib/gio/modules/giomodule.cache"
+          check_no_match "${homebrew_prefix}" "${resources_dir}/lib/gio/modules/giomodule.cache"
           check_no_match "${app_dir}" "${resources_dir}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
           check_no_match "${homebrew_prefix}" "${resources_dir}/lib/gdk-pixbuf-2.0/2.10.0/loaders.cache"
           check_no_match "out/artifacts/Holder.app" "${resources_dir}/manifest.txt"
@@ -623,6 +648,13 @@ jobs:
               exit 1
             fi
           done < <(find "${resources_dir}/lib/enchant-2" -maxdepth 1 -type f \( -name '*.so' -o -name '*.dylib' \) | sort)
+
+          while IFS= read -r module; do
+            if otool -L "${module}" | grep -F "${homebrew_prefix}/"; then
+              echo "${module} still links to Homebrew paths"
+              exit 1
+            fi
+          done < <(find "${resources_dir}/lib/gio/modules" -maxdepth 1 -type f \( -name '*.so' -o -name '*.dylib' \) | sort)
 
           codesign --verify --strict --verbose=2 "${app_dir}"
 
