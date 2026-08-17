@@ -83,17 +83,25 @@ jobs:
             )
 
             if (![string]::IsNullOrWhiteSpace($ProvidedRunId)) {
+              if ($ProvidedRunId -notmatch '^\d+$') {
+                throw "Provided run ID for $Artifact is not numeric: $ProvidedRunId"
+              }
               return $ProvidedRunId
             }
 
             $runsJson = gh api `
-              "repos/$Repository/actions/workflows/$Workflow/runs" `
+              "repos/$Repository/actions/runs" `
               -f "branch=$Branch" `
               -f "status=success" `
               -f "per_page=20"
             $runs = ($runsJson | ConvertFrom-Json).workflow_runs
 
             foreach ($run in $runs) {
+              if ([string] $run.id -notmatch '^\d+$') {
+                Write-Host "Ignoring non-numeric run ID from GitHub API: $($run.id)"
+                continue
+              }
+
               $artifactsJson = gh api "repos/$Repository/actions/runs/$($run.id)/artifacts"
               $artifacts = ($artifactsJson | ConvertFrom-Json).artifacts
               if ($artifacts | Where-Object { $_.name -eq $Artifact }) {

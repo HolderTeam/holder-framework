@@ -74,22 +74,37 @@ jobs:
           resolve_run_id() {
             local provided_run_id="$1"
             local repository="$2"
-            local workflow="$3"
+            local workflow_label="$3"
             local branch="$4"
             local artifact="$5"
 
             if [ -n "${provided_run_id}" ]; then
+              if ! [[ "${provided_run_id}" =~ ^[0-9]+$ ]]; then
+                echo "Provided run ID for ${artifact} is not numeric: ${provided_run_id}" >&2
+                return 1
+              fi
               echo "${provided_run_id}"
               return 0
             fi
 
             local candidate_run_id
-            for candidate_run_id in $(gh api \
-              "repos/${repository}/actions/workflows/${workflow}/runs" \
+            local candidate_run_ids
+            if ! candidate_run_ids="$(gh api \
+              "repos/${repository}/actions/runs" \
               -f branch="${branch}" \
               -f status=success \
               -f per_page=20 \
-              --jq '.workflow_runs[].id'); do
+              --jq '.workflow_runs[].id')"; then
+              echo "Could not list successful runs on ${repository}@${branch}" >&2
+              return 1
+            fi
+
+            for candidate_run_id in ${candidate_run_ids}; do
+              if ! [[ "${candidate_run_id}" =~ ^[0-9]+$ ]]; then
+                echo "Ignoring non-numeric run ID from GitHub API: ${candidate_run_id}" >&2
+                continue
+              fi
+
               if gh api "repos/${repository}/actions/runs/${candidate_run_id}/artifacts" \
                 --jq '.artifacts[].name' \
                 | grep -Fxq "${artifact}"; then
@@ -98,7 +113,7 @@ jobs:
               fi
             done
 
-            echo "No successful ${workflow} run on ${repository}@${branch} uploaded ${artifact}" >&2
+            echo "No successful ${workflow_label} run on ${repository}@${branch} uploaded ${artifact}" >&2
             return 1
           }
 
