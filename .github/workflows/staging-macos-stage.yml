@@ -4,16 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       desktop_run_id:
-        description: GitHub Actions run ID that uploaded holder-desktop-macos
-        required: true
+        description: GitHub Actions run ID that uploaded holder-desktop-macos. Leave blank for latest successful desktop_ref run.
+        required: false
+        default: ""
         type: string
       backend_run_id:
-        description: GitHub Actions run ID that uploaded holder-daemon-macos-backend
-        required: true
+        description: GitHub Actions run ID that uploaded holder-daemon-macos-backend. Leave blank for latest successful main run.
+        required: false
+        default: ""
         type: string
       launcher_run_id:
-        description: GitHub Actions run ID that uploaded holder-launcher-macos
-        required: true
+        description: GitHub Actions run ID that uploaded holder-launcher-macos. Leave blank for latest successful main run.
+        required: false
+        default: ""
         type: string
       desktop_repository:
         description: Repository containing the desktop artifact and packaging metadata
@@ -58,6 +61,76 @@ jobs:
           token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           path: sources/holder-desktop
 
+      - name: Resolve artifact run IDs
+        id: artifact_runs
+        env:
+          GH_TOKEN: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          DESKTOP_RUN_ID_INPUT: ${{ inputs.desktop_run_id }}
+          BACKEND_RUN_ID_INPUT: ${{ inputs.backend_run_id }}
+          LAUNCHER_RUN_ID_INPUT: ${{ inputs.launcher_run_id }}
+        run: |
+          set -euo pipefail
+
+          resolve_run_id() {
+            local provided_run_id="$1"
+            local repository="$2"
+            local workflow="$3"
+            local branch="$4"
+            local artifact="$5"
+
+            if [ -n "${provided_run_id}" ]; then
+              echo "${provided_run_id}"
+              return 0
+            fi
+
+            local candidate_run_id
+            for candidate_run_id in $(gh api \
+              "repos/${repository}/actions/workflows/${workflow}/runs" \
+              -f branch="${branch}" \
+              -f status=success \
+              -f per_page=20 \
+              --jq '.workflow_runs[].id'); do
+              if gh api "repos/${repository}/actions/runs/${candidate_run_id}/artifacts" \
+                --jq '.artifacts[].name' \
+                | grep -Fxq "${artifact}"; then
+                echo "${candidate_run_id}"
+                return 0
+              fi
+            done
+
+            echo "No successful ${workflow} run on ${repository}@${branch} uploaded ${artifact}" >&2
+            return 1
+          }
+
+          desktop_run_id="$(resolve_run_id \
+            "${DESKTOP_RUN_ID_INPUT}" \
+            "${{ inputs.desktop_repository }}" \
+            "macos-desktop.yml" \
+            "${{ inputs.desktop_ref }}" \
+            "holder-desktop-macos")"
+          backend_run_id="$(resolve_run_id \
+            "${BACKEND_RUN_ID_INPUT}" \
+            "${{ inputs.backend_repository }}" \
+            "macos-backend.yml" \
+            "main" \
+            "holder-daemon-macos-backend")"
+          launcher_run_id="$(resolve_run_id \
+            "${LAUNCHER_RUN_ID_INPUT}" \
+            "${{ inputs.launcher_repository }}" \
+            "macos-launcher.yml" \
+            "main" \
+            "holder-launcher-macos")"
+
+          {
+            echo "desktop_run_id=${desktop_run_id}"
+            echo "backend_run_id=${backend_run_id}"
+            echo "launcher_run_id=${launcher_run_id}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "Resolved holder-desktop macOS run: ${desktop_run_id}"
+          echo "Resolved holder-daemon macOS run: ${backend_run_id}"
+          echo "Resolved holder-launcher macOS run: ${launcher_run_id}"
+
       - name: Download desktop artifact
         uses: actions/download-artifact@v4
         with:
@@ -65,7 +138,7 @@ jobs:
           path: downloads/desktop
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           repository: ${{ inputs.desktop_repository }}
-          run-id: ${{ inputs.desktop_run_id }}
+          run-id: ${{ steps.artifact_runs.outputs.desktop_run_id }}
 
       - name: Download backend artifact
         uses: actions/download-artifact@v4
@@ -74,7 +147,7 @@ jobs:
           path: downloads/backend
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           repository: ${{ inputs.backend_repository }}
-          run-id: ${{ inputs.backend_run_id }}
+          run-id: ${{ steps.artifact_runs.outputs.backend_run_id }}
 
       - name: Download launcher artifact
         uses: actions/download-artifact@v4
@@ -83,7 +156,7 @@ jobs:
           path: downloads/launcher
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           repository: ${{ inputs.launcher_repository }}
-          run-id: ${{ inputs.launcher_run_id }}
+          run-id: ${{ steps.artifact_runs.outputs.launcher_run_id }}
 
       - name: Install Homebrew runtime tools
         run: |
@@ -464,11 +537,11 @@ jobs:
           DESKTOP_REPOSITORY="${{ inputs.desktop_repository }}" \
           DESKTOP_REF="${{ inputs.desktop_ref }}" \
           DESKTOP_SHA="${desktop_sha}" \
-          DESKTOP_RUN_ID="${{ inputs.desktop_run_id }}" \
+          DESKTOP_RUN_ID="${{ steps.artifact_runs.outputs.desktop_run_id }}" \
           BACKEND_REPOSITORY="${{ inputs.backend_repository }}" \
-          BACKEND_RUN_ID="${{ inputs.backend_run_id }}" \
+          BACKEND_RUN_ID="${{ steps.artifact_runs.outputs.backend_run_id }}" \
           LAUNCHER_REPOSITORY="${{ inputs.launcher_repository }}" \
-          LAUNCHER_RUN_ID="${{ inputs.launcher_run_id }}" \
+          LAUNCHER_RUN_ID="${{ steps.artifact_runs.outputs.launcher_run_id }}" \
           METADATA_PATH="${metadata_dir}/release-candidate.json" \
           python3 - <<'PY'
           import json

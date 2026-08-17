@@ -4,16 +4,19 @@ on:
   workflow_dispatch:
     inputs:
       desktop_run_id:
-        description: GitHub Actions run ID that uploaded holder-desktop-windows
-        required: true
+        description: GitHub Actions run ID that uploaded holder-desktop-windows. Leave blank for latest successful desktop_ref run.
+        required: false
+        default: ""
         type: string
       backend_run_id:
-        description: GitHub Actions run ID that uploaded holder-daemon-windows-backend
-        required: true
+        description: GitHub Actions run ID that uploaded holder-daemon-windows-backend. Leave blank for latest successful main run.
+        required: false
+        default: ""
         type: string
       launcher_run_id:
-        description: GitHub Actions run ID that uploaded holder-launcher-windows
-        required: true
+        description: GitHub Actions run ID that uploaded holder-launcher-windows. Leave blank for latest successful main run.
+        required: false
+        default: ""
         type: string
       desktop_repository:
         description: Repository containing the desktop artifact and packaging metadata
@@ -59,6 +62,75 @@ jobs:
           token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           path: sources/holder-desktop
 
+      - name: Resolve artifact run IDs
+        id: artifact_runs
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          DESKTOP_RUN_ID_INPUT: ${{ inputs.desktop_run_id }}
+          BACKEND_RUN_ID_INPUT: ${{ inputs.backend_run_id }}
+          LAUNCHER_RUN_ID_INPUT: ${{ inputs.launcher_run_id }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Resolve-RunId {
+            param(
+              [string] $ProvidedRunId,
+              [string] $Repository,
+              [string] $Workflow,
+              [string] $Branch,
+              [string] $Artifact
+            )
+
+            if (![string]::IsNullOrWhiteSpace($ProvidedRunId)) {
+              return $ProvidedRunId
+            }
+
+            $runsJson = gh api `
+              "repos/$Repository/actions/workflows/$Workflow/runs" `
+              -f "branch=$Branch" `
+              -f "status=success" `
+              -f "per_page=20"
+            $runs = ($runsJson | ConvertFrom-Json).workflow_runs
+
+            foreach ($run in $runs) {
+              $artifactsJson = gh api "repos/$Repository/actions/runs/$($run.id)/artifacts"
+              $artifacts = ($artifactsJson | ConvertFrom-Json).artifacts
+              if ($artifacts | Where-Object { $_.name -eq $Artifact }) {
+                return [string] $run.id
+              }
+            }
+
+            throw "No successful $Workflow run on $Repository@$Branch uploaded $Artifact"
+          }
+
+          $desktopRunId = Resolve-RunId `
+            -ProvidedRunId $env:DESKTOP_RUN_ID_INPUT `
+            -Repository "${{ inputs.desktop_repository }}" `
+            -Workflow "windows-desktop.yml" `
+            -Branch "${{ inputs.desktop_ref }}" `
+            -Artifact "holder-desktop-windows"
+          $backendRunId = Resolve-RunId `
+            -ProvidedRunId $env:BACKEND_RUN_ID_INPUT `
+            -Repository "${{ inputs.backend_repository }}" `
+            -Workflow "windows-backend.yml" `
+            -Branch "main" `
+            -Artifact "holder-daemon-windows-backend"
+          $launcherRunId = Resolve-RunId `
+            -ProvidedRunId $env:LAUNCHER_RUN_ID_INPUT `
+            -Repository "${{ inputs.launcher_repository }}" `
+            -Workflow "windows-launcher.yml" `
+            -Branch "main" `
+            -Artifact "holder-launcher-windows"
+
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "desktop_run_id=$desktopRunId"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "backend_run_id=$backendRunId"
+          Add-Content -Path $env:GITHUB_OUTPUT -Value "launcher_run_id=$launcherRunId"
+
+          Write-Host "Resolved holder-desktop Windows run: $desktopRunId"
+          Write-Host "Resolved holder-daemon Windows run: $backendRunId"
+          Write-Host "Resolved holder-launcher Windows run: $launcherRunId"
+
       - name: Download desktop artifact
         uses: actions/download-artifact@v4
         with:
@@ -66,7 +138,7 @@ jobs:
           path: downloads/desktop
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           repository: ${{ inputs.desktop_repository }}
-          run-id: ${{ inputs.desktop_run_id }}
+          run-id: ${{ steps.artifact_runs.outputs.desktop_run_id }}
 
       - name: Download backend artifact
         uses: actions/download-artifact@v4
@@ -75,7 +147,7 @@ jobs:
           path: downloads/backend
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           repository: ${{ inputs.backend_repository }}
-          run-id: ${{ inputs.backend_run_id }}
+          run-id: ${{ steps.artifact_runs.outputs.backend_run_id }}
 
       - name: Download launcher artifact
         uses: actions/download-artifact@v4
@@ -84,7 +156,7 @@ jobs:
           path: downloads/launcher
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           repository: ${{ inputs.launcher_repository }}
-          run-id: ${{ inputs.launcher_run_id }}
+          run-id: ${{ steps.artifact_runs.outputs.launcher_run_id }}
 
       - name: Install Inno Setup
         shell: pwsh
@@ -94,12 +166,12 @@ jobs:
         shell: pwsh
         env:
           BACKEND_REPOSITORY: ${{ inputs.backend_repository }}
-          BACKEND_RUN_ID: ${{ inputs.backend_run_id }}
+          BACKEND_RUN_ID: ${{ steps.artifact_runs.outputs.backend_run_id }}
           DESKTOP_REPOSITORY: ${{ inputs.desktop_repository }}
           DESKTOP_REF: ${{ inputs.desktop_ref }}
-          DESKTOP_RUN_ID: ${{ inputs.desktop_run_id }}
+          DESKTOP_RUN_ID: ${{ steps.artifact_runs.outputs.desktop_run_id }}
           LAUNCHER_REPOSITORY: ${{ inputs.launcher_repository }}
-          LAUNCHER_RUN_ID: ${{ inputs.launcher_run_id }}
+          LAUNCHER_RUN_ID: ${{ steps.artifact_runs.outputs.launcher_run_id }}
           STAGING_REPOSITORY: ${{ github.repository }}
           STAGING_RUN_ID: ${{ github.run_id }}
         run: |
