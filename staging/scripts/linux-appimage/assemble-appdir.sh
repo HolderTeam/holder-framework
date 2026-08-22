@@ -71,11 +71,11 @@ require_dir "${pixbuf_loaders_source}"
 require_dir "${gtk_runtime_source}"
 require_dir "${gtk_runtime_source}/4.0.0/immodules"
 require_dir "${enchant_modules_source}"
-require_dir /usr/share/glib-2.0/schemas
 require_dir /usr/share/icons/Adwaita
 require_dir /usr/share/icons/hicolor
 require_dir /usr/share/gtksourceview-5
 require_dir /usr/share/hunspell
+require_file "${appdir}/usr/share/glib-2.0/schemas/team.holder.Holder.gschema.xml"
 
 install -d \
   "${appdir}/usr/lib/${multiarch}/gio/modules" \
@@ -95,16 +95,6 @@ cp -a "${gtk_runtime_source}/." \
 cp -a "${enchant_modules_source}/." \
   "${appdir}/usr/lib/${multiarch}/enchant-2/"
 
-while IFS= read -r schema_file; do
-  schema_name="$(basename "${schema_file}")"
-  if [ ! -e "${appdir}/usr/share/glib-2.0/schemas/${schema_name}" ]; then
-    cp -a "${schema_file}" "${appdir}/usr/share/glib-2.0/schemas/"
-  fi
-done < <(
-  find /usr/share/glib-2.0/schemas -maxdepth 1 -type f \
-    \( -name '*.gschema.xml' -o -name '*.enums.xml' -o -name '*.gschema.override' \) \
-    | sort
-)
 cp -a /usr/share/icons/Adwaita "${appdir}/usr/share/icons/"
 cp -a --update=none /usr/share/icons/hicolor/. "${appdir}/usr/share/icons/hicolor/"
 cp -a /usr/share/gtksourceview-5 "${appdir}/usr/share/"

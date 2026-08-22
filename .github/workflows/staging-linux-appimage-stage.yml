@@ -401,6 +401,7 @@ jobs:
           require_executable "${appdir}/usr/bin/holder-desktop"
           require_executable "${appdir}/usr/bin/holderd"
           require_executable "${appdir}/usr/bin/holderctl"
+          require_file "${appdir}/usr/share/glib-2.0/schemas/team.holder.Holder.gschema.xml"
           require_file "${appdir}/usr/share/glib-2.0/schemas/gschemas.compiled"
           require_file "${appdir}/usr/lib/${multiarch}/gio/modules/giomodule.cache"
           require_file "${appdir}/usr/lib/${multiarch}/gdk-pixbuf-2.0/2.10.0/loaders.cache.in"
@@ -410,6 +411,15 @@ jobs:
           require_file "${appdir}/usr/share/hunspell/en_GB.dic"
           require_file "${appdir}/usr/share/icons/Adwaita/index.theme"
           require_file "${appdir}/usr/share/holder/release/holder-appimage-provenance.json"
+
+          wm_schema="${appdir}/usr/share/glib-2.0/schemas/org.gnome.desktop.wm.preferences.gschema.xml"
+          if [ -e "${wm_schema}" ]; then
+            echo "Host window-manager schema must not be bundled: ${wm_schema}" >&2
+            exit 1
+          fi
+
+          GSETTINGS_SCHEMA_DIR="${appdir}/usr/share/glib-2.0/schemas" \
+            gsettings list-keys team.holder.Holder >/dev/null
 
           desktop-file-validate "${appdir}/team.holder.Holder.desktop"
           appstreamcli validate --no-net \
