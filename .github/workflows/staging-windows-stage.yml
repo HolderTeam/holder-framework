@@ -27,7 +27,7 @@ on:
         description: holder-desktop ref to read VERSION and Windows packaging templates from
         required: true
         type: string
-        default: master
+        default: main
       backend_repository:
         description: Repository containing the backend artifact
         required: true

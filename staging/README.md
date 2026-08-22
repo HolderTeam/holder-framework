@@ -13,7 +13,7 @@ Run it manually from:
 
 https://github.com/HolderTeam/holder-staging/actions/workflows/windows-stage.yml
 
-Use the successful workflow run IDs from the three input repositories. The desktop repo currently uses `master`; the daemon and launcher repos use `main`.
+Use the successful workflow run IDs from the three input repositories. The desktop, daemon, and launcher repos use `main`.
 
 The workflow uploads two artifacts:
 
