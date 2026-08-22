@@ -1,0 +1,470 @@
+name: Linux AppImage staged package
+
+on:
+  workflow_dispatch:
+    inputs:
+      desktop_run_id:
+        description: Optional holder-desktop Linux run ID; blank uses the latest successful main artifact
+        required: false
+        default: ""
+        type: string
+      backend_run_id:
+        description: Optional holder-daemon Linux run ID; blank uses the latest successful main artifact
+        required: false
+        default: ""
+        type: string
+      desktop_repository:
+        description: Repository containing the Linux desktop artifact
+        required: false
+        default: HolderTeam/holder-desktop
+        type: string
+      desktop_ref:
+        description: Branch used when automatically resolving the desktop artifact
+        required: false
+        default: main
+        type: string
+      backend_repository:
+        description: Repository containing the Linux backend artifact
+        required: false
+        default: HolderTeam/holder-daemon
+        type: string
+      backend_ref:
+        description: Branch used when automatically resolving the backend artifact
+        required: false
+        default: main
+        type: string
+      appimage_version:
+        description: Optional product version; blank uses holder-staging/VERSION
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+jobs:
+  stage:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out holder-staging
+        uses: actions/checkout@v4
+        with:
+          path: sources/holder-staging
+
+      - name: Resolve component artifact runs
+        id: artifact_runs
+        env:
+          GH_TOKEN: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          DESKTOP_RUN_ID_INPUT: ${{ inputs.desktop_run_id }}
+          BACKEND_RUN_ID_INPUT: ${{ inputs.backend_run_id }}
+          DESKTOP_REPOSITORY: ${{ inputs.desktop_repository }}
+          DESKTOP_REF: ${{ inputs.desktop_ref }}
+          BACKEND_REPOSITORY: ${{ inputs.backend_repository }}
+          BACKEND_REF: ${{ inputs.backend_ref }}
+        run: |
+          set -euo pipefail
+
+          artifact_id_for_run() {
+            local repository="$1"
+            local run_id="$2"
+            local artifact="$3"
+
+            gh api "repos/${repository}/actions/runs/${run_id}/artifacts" \
+              --jq ".artifacts[] | select(.name == \"${artifact}\" and .expired == false) | .id" \
+              | head -n 1
+          }
+
+          resolve_run_id() {
+            local provided_run_id="$1"
+            local repository="$2"
+            local workflow_file="$3"
+            local branch="$4"
+            local artifact="$5"
+            local run_id
+            local conclusion
+
+            if [ -n "${provided_run_id}" ]; then
+              if ! [[ "${provided_run_id}" =~ ^[0-9]+$ ]]; then
+                echo "Provided run ID for ${artifact} is not numeric: ${provided_run_id}" >&2
+                return 1
+              fi
+              conclusion="$(gh api \
+                "repos/${repository}/actions/runs/${provided_run_id}" \
+                --jq '.conclusion')"
+              if [ "${conclusion}" != "success" ]; then
+                echo "Provided run ${repository}#${provided_run_id} did not conclude successfully." >&2
+                return 1
+              fi
+              if [ -z "$(artifact_id_for_run "${repository}" "${provided_run_id}" "${artifact}")" ]; then
+                echo "Provided run ${repository}#${provided_run_id} has no unexpired ${artifact} artifact." >&2
+                return 1
+              fi
+              echo "${provided_run_id}"
+              return
+            fi
+
+            while IFS= read -r run_id; do
+              if [[ "${run_id}" =~ ^[0-9]+$ ]] && \
+                 [ -n "$(artifact_id_for_run "${repository}" "${run_id}" "${artifact}")" ]; then
+                echo "${run_id}"
+                return
+              fi
+            done < <(
+              gh api --method GET \
+                "repos/${repository}/actions/workflows/${workflow_file}/runs" \
+                -f branch="${branch}" \
+                -f status=success \
+                -f per_page=30 \
+                --jq '.workflow_runs[].id'
+            )
+
+            echo "No successful ${workflow_file} run on ${repository}@${branch} has an unexpired ${artifact} artifact." >&2
+            return 1
+          }
+
+          desktop_run_id="$(resolve_run_id \
+            "${DESKTOP_RUN_ID_INPUT}" \
+            "${DESKTOP_REPOSITORY}" \
+            "linux-desktop.yml" \
+            "${DESKTOP_REF}" \
+            "holder-desktop-linux-x86_64")"
+          backend_run_id="$(resolve_run_id \
+            "${BACKEND_RUN_ID_INPUT}" \
+            "${BACKEND_REPOSITORY}" \
+            "linux-backend.yml" \
+            "${BACKEND_REF}" \
+            "holder-daemon-linux-x86_64")"
+
+          {
+            echo "desktop_run_id=${desktop_run_id}"
+            echo "backend_run_id=${backend_run_id}"
+          } >> "${GITHUB_OUTPUT}"
+
+          desktop_url="https://github.com/${DESKTOP_REPOSITORY}/actions/runs/${desktop_run_id}"
+          backend_url="https://github.com/${BACKEND_REPOSITORY}/actions/runs/${backend_run_id}"
+          {
+            echo "## Resolved component runs"
+            echo
+            echo "- Desktop: [${DESKTOP_REPOSITORY}#${desktop_run_id}](${desktop_url})"
+            echo "- Backend: [${BACKEND_REPOSITORY}#${backend_run_id}](${backend_url})"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Download desktop artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: holder-desktop-linux-x86_64
+          path: downloads/desktop
+          github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          repository: ${{ inputs.desktop_repository }}
+          run-id: ${{ steps.artifact_runs.outputs.desktop_run_id }}
+
+      - name: Download backend artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: holder-daemon-linux-x86_64
+          path: downloads/backend
+          github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          repository: ${{ inputs.backend_repository }}
+          run-id: ${{ steps.artifact_runs.outputs.backend_run_id }}
+
+      - name: Install AppImage assembly dependencies
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+          sudo apt-get install -y \
+            adwaita-icon-theme \
+            appstream \
+            curl \
+            dbus-x11 \
+            dconf-gsettings-backend \
+            desktop-file-utils \
+            file \
+            gcc \
+            glib-networking \
+            gvfs-libs \
+            hicolor-icon-theme \
+            hunspell-en-gb \
+            hunspell-en-us \
+            jq \
+            libadwaita-1-dev \
+            libboost-filesystem-dev \
+            libgdk-pixbuf2.0-bin \
+            libgee-0.8-dev \
+            libgit2-dev \
+            libglib2.0-bin \
+            libgtk-4-bin \
+            libgtk-4-dev \
+            libgtksourceview-5-dev \
+            libjson-glib-dev \
+            libmd4c-dev \
+            libsecret-1-dev \
+            libsodium-dev \
+            libsoup-3.0-dev \
+            libspelling-1-dev \
+            libspdlog-dev \
+            libsqlite3-dev \
+            libssl-dev \
+            libvte-2.91-gtk4-dev \
+            libyaml-cpp-dev \
+            librsvg2-common \
+            patchelf \
+            pax-utils \
+            pkg-config \
+            shared-mime-info
+
+      - name: Extract and verify component artifacts
+        run: |
+          set -euo pipefail
+
+          verify_and_extract() {
+            local download_dir="$1"
+            local extract_dir="$2"
+            local archive
+            local checksum
+
+            mapfile -t archives < <(find "${download_dir}" -maxdepth 1 -type f -name '*.tar.gz' | sort)
+            mapfile -t checksums < <(find "${download_dir}" -maxdepth 1 -type f -name '*.tar.gz.sha256' | sort)
+            if [ "${#archives[@]}" -ne 1 ] || [ "${#checksums[@]}" -ne 1 ]; then
+              echo "Expected one archive and checksum in ${download_dir}." >&2
+              find "${download_dir}" -maxdepth 2 -type f -print >&2
+              return 1
+            fi
+            archive="${archives[0]}"
+            checksum="${checksums[0]}"
+            (
+              cd "${download_dir}"
+              sha256sum -c "$(basename "${checksum}")"
+            )
+            install -d "${extract_dir}"
+            tar -C "${extract_dir}" -xzf "${archive}"
+          }
+
+          verify_and_extract downloads/desktop work/desktop-root
+          verify_and_extract downloads/backend work/backend-root
+
+      - name: Validate component compatibility
+        id: compatibility
+        env:
+          APPIMAGE_VERSION_INPUT: ${{ inputs.appimage_version }}
+        run: |
+          set -euo pipefail
+
+          desktop_root="work/desktop-root"
+          backend_root="work/backend-root"
+          compatibility_file="${desktop_root}/release/holder-desktop-daemon-api.json"
+
+          desktop_version="$(cat "${desktop_root}/release/holder-desktop-version.txt")"
+          backend_version="$(cat "${backend_root}/release/holder-daemon-version.txt")"
+          backend_api_version="$(cat "${backend_root}/release/holder-daemon-api-version.txt")"
+          desktop_api_minimum="$(jq -er '.daemon_api.minimum' "${compatibility_file}")"
+          desktop_api_maximum="$(jq -er '.daemon_api.maximum_exclusive' "${compatibility_file}")"
+          appimage_version="${APPIMAGE_VERSION_INPUT:-$(tr -d '[:space:]' < sources/holder-staging/VERSION)}"
+
+          semver_pattern='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          api_pattern='^[0-9]+\.[0-9]+$'
+          for component_version in "${desktop_version}" "${backend_version}" "${appimage_version}"; do
+            if ! [[ "${component_version}" =~ ${semver_pattern} ]]; then
+              echo "Invalid component/product semantic version: ${component_version}" >&2
+              exit 1
+            fi
+          done
+          for api_version in "${backend_api_version}" "${desktop_api_minimum}" "${desktop_api_maximum}"; do
+            if ! [[ "${api_version}" =~ ${api_pattern} ]]; then
+              echo "Invalid daemon API compatibility version: ${api_version}" >&2
+              exit 1
+            fi
+          done
+
+          version_at_least() {
+            [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1)" = "$1" ]
+          }
+          if ! version_at_least "${desktop_api_minimum}" "${backend_api_version}" || \
+             version_at_least "${desktop_api_maximum}" "${backend_api_version}"; then
+            echo "Desktop supports daemon API >=${desktop_api_minimum},<${desktop_api_maximum}; backend provides ${backend_api_version}." >&2
+            exit 1
+          fi
+
+          case "${appimage_version}" in
+            *-*) ;;
+            *)
+              case "${desktop_version}" in *-*) echo "Stable AppImage cannot contain prerelease desktop ${desktop_version}." >&2; exit 1;; esac
+              case "${backend_version}" in *-*) echo "Stable AppImage cannot contain prerelease backend ${backend_version}." >&2; exit 1;; esac
+              ;;
+          esac
+
+          {
+            echo "appimage_version=${appimage_version}"
+            echo "desktop_version=${desktop_version}"
+            echo "backend_version=${backend_version}"
+            echo "backend_api_version=${backend_api_version}"
+            echo "desktop_api_minimum=${desktop_api_minimum}"
+            echo "desktop_api_maximum=${desktop_api_maximum}"
+          } >> "${GITHUB_OUTPUT}"
+
+          {
+            echo
+            echo "## Compatibility"
+            echo
+            echo "- AppImage: \`${appimage_version}\`"
+            echo "- Desktop: \`${desktop_version}\`"
+            echo "- Backend: \`${backend_version}\`"
+            echo "- Daemon API: \`${backend_api_version}\` (desktop accepts \`>=${desktop_api_minimum},<${desktop_api_maximum}\`)"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Assemble AppDir and bundle runtime
+        env:
+          APPIMAGE_VERSION: ${{ steps.compatibility.outputs.appimage_version }}
+          BACKEND_REPOSITORY: ${{ inputs.backend_repository }}
+          BACKEND_RUN_ID: ${{ steps.artifact_runs.outputs.backend_run_id }}
+          DESKTOP_REPOSITORY: ${{ inputs.desktop_repository }}
+          DESKTOP_RUN_ID: ${{ steps.artifact_runs.outputs.desktop_run_id }}
+        run: |
+          set -euo pipefail
+
+          appdir="${PWD}/out/Holder.AppDir"
+          install -d "${appdir}"
+          bash sources/holder-staging/scripts/linux-appimage/assemble-appdir.sh \
+            work/desktop-root \
+            work/backend-root \
+            "${appdir}" \
+            "${APPIMAGE_VERSION}"
+
+          jq -n \
+            --arg appimage_version "${APPIMAGE_VERSION}" \
+            --arg desktop_repository "${DESKTOP_REPOSITORY}" \
+            --arg desktop_run_id "${DESKTOP_RUN_ID}" \
+            --arg desktop_version "${{ steps.compatibility.outputs.desktop_version }}" \
+            --arg desktop_commit "$(cat work/desktop-root/release/holder-desktop-commit.txt)" \
+            --arg backend_repository "${BACKEND_REPOSITORY}" \
+            --arg backend_run_id "${BACKEND_RUN_ID}" \
+            --arg backend_version "${{ steps.compatibility.outputs.backend_version }}" \
+            --arg backend_commit "$(cat work/backend-root/release/holder-daemon-commit.txt)" \
+            --arg daemon_api "${{ steps.compatibility.outputs.backend_api_version }}" \
+            '{
+              appimage_version: $appimage_version,
+              desktop: {
+                repository: $desktop_repository,
+                run_id: $desktop_run_id,
+                version: $desktop_version,
+                commit: $desktop_commit
+              },
+              backend: {
+                repository: $backend_repository,
+                run_id: $backend_run_id,
+                version: $backend_version,
+                commit: $backend_commit,
+                api_version: $daemon_api
+              }
+            }' > "${appdir}/usr/share/holder/release/holder-appimage-provenance.json"
+
+          (
+            cd "${appdir}"
+            find . \( -type f -o -type l \) \
+              ! -path './usr/share/holder/release/holder-appimage-manifest.txt' \
+              | sed 's#^\./##' \
+              | sort \
+              > usr/share/holder/release/holder-appimage-manifest.txt
+          )
+
+      - name: Smoke-test assembled AppDir
+        run: |
+          set -euo pipefail
+
+          appdir="${PWD}/out/Holder.AppDir"
+          multiarch="$(gcc -print-multiarch)"
+          export LD_LIBRARY_PATH="${appdir}/usr/lib:${appdir}/usr/lib/${multiarch}"
+
+          test -x "${appdir}/AppRun"
+          test -x "${appdir}/usr/bin/holder-desktop"
+          test -x "${appdir}/usr/bin/holderd"
+          test -x "${appdir}/usr/bin/holderctl"
+          test -f "${appdir}/usr/share/glib-2.0/schemas/gschemas.compiled"
+          test -f "${appdir}/usr/lib/${multiarch}/gio/modules/giomodule.cache"
+          test -f "${appdir}/usr/lib/${multiarch}/gdk-pixbuf-2.0/2.10.0/loaders.cache.in"
+          test -d "${appdir}/usr/lib/${multiarch}/gtk-4.0/4.0.0/immodules"
+          test -d "${appdir}/usr/lib/${multiarch}/enchant-2"
+          test -d "${appdir}/usr/share/gtksourceview-5/language-specs"
+          test -f "${appdir}/usr/share/hunspell/en_GB.dic"
+          test -f "${appdir}/usr/share/icons/Adwaita/index.theme"
+          test -f "${appdir}/usr/share/holder/release/holder-appimage-provenance.json"
+
+          desktop-file-validate "${appdir}/team.holder.Holder.desktop"
+          appstreamcli validate --no-net \
+            "${appdir}/usr/share/metainfo/team.holder.Holder.metainfo.xml"
+          bash -n "${appdir}/AppRun"
+
+          for executable in holder-desktop holderd holderctl; do
+            runtime_libraries="$(ldd "${appdir}/usr/bin/${executable}")"
+            printf '%s\n' "${runtime_libraries}"
+            if grep -q 'not found' <<<"${runtime_libraries}"; then
+              echo "Unresolved runtime dependency for ${executable}." >&2
+              exit 1
+            fi
+          done
+
+          runtime_dir="$(mktemp -d)"
+          export XDG_DATA_HOME="${runtime_dir}/data"
+          export XDG_CONFIG_HOME="${runtime_dir}/config"
+          export XDG_CACHE_HOME="${runtime_dir}/cache"
+          export HOLDER_TEST_KEYSTORE_DIR="${runtime_dir}/keystore"
+          HOLDER_APPRUN_SMOKE_TEST=1 "${appdir}/AppRun"
+
+      - name: Build staged AppImage
+        env:
+          APPIMAGE_VERSION: ${{ steps.compatibility.outputs.appimage_version }}
+        run: |
+          set -euo pipefail
+
+          output_dir="${PWD}/out/artifacts"
+          appdir="${PWD}/out/Holder.AppDir"
+          appimage_name="Holder-${APPIMAGE_VERSION}-x86_64.AppImage"
+          appimagetool="${PWD}/out/tools/appimagetool-x86_64.AppImage"
+
+          install -d "${output_dir}" "$(dirname "${appimagetool}")"
+          curl --fail --location --retry 3 \
+            https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage \
+            -o "${appimagetool}"
+          chmod 0755 "${appimagetool}"
+
+          ARCH=x86_64 VERSION="${APPIMAGE_VERSION}" APPIMAGE_EXTRACT_AND_RUN=1 \
+            "${appimagetool}" "${appdir}" "${output_dir}/${appimage_name}"
+          chmod 0755 "${output_dir}/${appimage_name}"
+
+          tar -C "$(dirname "${appdir}")" -czf \
+            "${output_dir}/Holder-${APPIMAGE_VERSION}-x86_64.AppDir.tar.gz" \
+            "$(basename "${appdir}")"
+          cp "${appdir}/usr/share/holder/release/holder-appimage-provenance.json" \
+            "${output_dir}/Holder-${APPIMAGE_VERSION}-provenance.json"
+
+          (
+            cd "${output_dir}"
+            sha256sum \
+              "${appimage_name}" \
+              "Holder-${APPIMAGE_VERSION}-x86_64.AppDir.tar.gz" \
+              > "Holder-${APPIMAGE_VERSION}-SHA256SUMS"
+          )
+
+      - name: Smoke-test final AppImage
+        env:
+          APPIMAGE_VERSION: ${{ steps.compatibility.outputs.appimage_version }}
+        run: |
+          set -euo pipefail
+
+          appimage="${PWD}/out/artifacts/Holder-${APPIMAGE_VERSION}-x86_64.AppImage"
+          runtime_dir="$(mktemp -d)"
+          export XDG_DATA_HOME="${runtime_dir}/data"
+          export XDG_CONFIG_HOME="${runtime_dir}/config"
+          export XDG_CACHE_HOME="${runtime_dir}/cache"
+          export HOLDER_TEST_KEYSTORE_DIR="${runtime_dir}/keystore"
+          APPIMAGE_EXTRACT_AND_RUN=1 HOLDER_APPRUN_SMOKE_TEST=1 "${appimage}"
+
+      - name: Upload staged Linux package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Holder-linux-appimage-staged
+          path: out/artifacts/*
+          if-no-files-found: error
+          retention-days: 7

@@ -29,6 +29,35 @@ The workflow needs a protected GitHub environment named `windows-staging` with a
 
 If the artifact downloads need cross-repository authentication, add a repository secret named `HOLDER_CI_ARTIFACT_TOKEN` with read-only access to the build artifacts.
 
+## Linux AppImage
+
+The Linux AppImage workflow combines the native Ubuntu 24.04 artifacts from
+`holder-desktop` and `holder-daemon`, bundles their GTK/GIO runtime, and uploads
+both an AppImage and its assembled AppDir:
+
+https://github.com/HolderTeam/holder-staging/actions/workflows/linux-appimage-stage.yml
+
+All workflow inputs are optional. Running it without changes selects the newest
+successful `linux-desktop.yml` and `linux-backend.yml` runs on each repository's
+`main` branch that still have downloadable artifacts. Run IDs, repositories,
+branches, and the AppImage product version can be overridden when reproducing or
+testing a specific combination.
+
+Desktop and daemon package versions do not have to be identical. The workflow
+uses the compatibility metadata published in their artifacts instead: the daemon
+declares one API version and the desktop declares the supported API range. A
+stable AppImage version will not accept prerelease component builds.
+
+The `Holder-linux-appimage-staged` artifact contains:
+
+- `Holder-<version>-x86_64.AppImage`
+- A matching AppDir archive for inspection and debugging
+- SHA-256 checksums and component provenance
+
+The AppImage launcher uses an already-running compatible Holder daemon when one
+is available. Otherwise it starts the bundled daemon, waits for it to become
+healthy, and stops that process when the desktop exits.
+
 ## Mac
 
 How to manually test a prerelease development version of Holder, aka a "staged copy".
