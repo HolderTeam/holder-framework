@@ -188,6 +188,7 @@ jobs:
             hicolor-icon-theme \
             hunspell-en-gb \
             hunspell-en-us \
+            ibus-gtk4 \
             jq \
             libadwaita-1-dev \
             libboost-filesystem-dev \
@@ -377,19 +378,38 @@ jobs:
           multiarch="$(gcc -print-multiarch)"
           export LD_LIBRARY_PATH="${appdir}/usr/lib:${appdir}/usr/lib/${multiarch}"
 
-          test -x "${appdir}/AppRun"
-          test -x "${appdir}/usr/bin/holder-desktop"
-          test -x "${appdir}/usr/bin/holderd"
-          test -x "${appdir}/usr/bin/holderctl"
-          test -f "${appdir}/usr/share/glib-2.0/schemas/gschemas.compiled"
-          test -f "${appdir}/usr/lib/${multiarch}/gio/modules/giomodule.cache"
-          test -f "${appdir}/usr/lib/${multiarch}/gdk-pixbuf-2.0/2.10.0/loaders.cache.in"
-          test -d "${appdir}/usr/lib/${multiarch}/gtk-4.0/4.0.0/immodules"
-          test -d "${appdir}/usr/lib/${multiarch}/enchant-2"
-          test -d "${appdir}/usr/share/gtksourceview-5/language-specs"
-          test -f "${appdir}/usr/share/hunspell/en_GB.dic"
-          test -f "${appdir}/usr/share/icons/Adwaita/index.theme"
-          test -f "${appdir}/usr/share/holder/release/holder-appimage-provenance.json"
+          require_executable() {
+            if [ ! -x "$1" ]; then
+              echo "Required executable is missing: $1" >&2
+              exit 1
+            fi
+          }
+          require_file() {
+            if [ ! -f "$1" ]; then
+              echo "Required file is missing: $1" >&2
+              exit 1
+            fi
+          }
+          require_dir() {
+            if [ ! -d "$1" ]; then
+              echo "Required directory is missing: $1" >&2
+              exit 1
+            fi
+          }
+
+          require_executable "${appdir}/AppRun"
+          require_executable "${appdir}/usr/bin/holder-desktop"
+          require_executable "${appdir}/usr/bin/holderd"
+          require_executable "${appdir}/usr/bin/holderctl"
+          require_file "${appdir}/usr/share/glib-2.0/schemas/gschemas.compiled"
+          require_file "${appdir}/usr/lib/${multiarch}/gio/modules/giomodule.cache"
+          require_file "${appdir}/usr/lib/${multiarch}/gdk-pixbuf-2.0/2.10.0/loaders.cache.in"
+          require_dir "${appdir}/usr/lib/${multiarch}/gtk-4.0/4.0.0/immodules"
+          require_dir "${appdir}/usr/lib/${multiarch}/enchant-2"
+          require_dir "${appdir}/usr/share/gtksourceview-5/language-specs"
+          require_file "${appdir}/usr/share/hunspell/en_GB.dic"
+          require_file "${appdir}/usr/share/icons/Adwaita/index.theme"
+          require_file "${appdir}/usr/share/holder/release/holder-appimage-provenance.json"
 
           desktop-file-validate "${appdir}/team.holder.Holder.desktop"
           appstreamcli validate --no-net \

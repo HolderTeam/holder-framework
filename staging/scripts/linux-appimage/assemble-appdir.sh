@@ -69,6 +69,7 @@ enchant_modules_source="/usr/lib/${multiarch}/enchant-2"
 require_dir "${gio_modules_source}"
 require_dir "${pixbuf_loaders_source}"
 require_dir "${gtk_runtime_source}"
+require_dir "${gtk_runtime_source}/4.0.0/immodules"
 require_dir "${enchant_modules_source}"
 require_dir /usr/share/glib-2.0/schemas
 require_dir /usr/share/icons/Adwaita
