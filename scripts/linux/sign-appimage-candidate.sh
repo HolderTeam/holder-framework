@@ -3,7 +3,7 @@
 set -euo pipefail
 
 if [ "$#" -ne 9 ]; then
-  echo "Usage: $0 VERIFIED_DIR OUTPUT_DIR APPIMAGETOOL RUNTIME_FILE FINGERPRINT STAGING_REPOSITORY STAGING_RUN_ID RELEASE_REPOSITORY RELEASE_RUN_ID" >&2
+  echo "Usage: $0 VERIFIED_DIR OUTPUT_DIR APPIMAGETOOL RUNTIME_FILE EXPECTED_PUBLIC_KEY STAGING_REPOSITORY STAGING_RUN_ID RELEASE_REPOSITORY RELEASE_RUN_ID" >&2
   exit 2
 fi
 
@@ -11,7 +11,7 @@ verified_dir="$(realpath "$1")"
 output_dir="$2"
 appimagetool="$(realpath "$3")"
 runtime_file="$(realpath "$4")"
-fingerprint="$(printf '%s' "$5" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+expected_public_key="$(realpath "$5")"
 staging_repository="$6"
 staging_run_id="$7"
 release_repository="$8"
@@ -20,10 +20,6 @@ release_run_id="$9"
 : "${HOLDER_GPG_SIGNING_KEY_B64:?HOLDER_GPG_SIGNING_KEY_B64 is required}"
 : "${HOLDER_GPG_SIGNING_PASSPHRASE:?HOLDER_GPG_SIGNING_PASSPHRASE is required}"
 
-if ! [[ "${fingerprint}" =~ ^([0-9A-F]{40}|[0-9A-F]{64})$ ]]; then
-  echo "The configured signing fingerprint is not a full OpenPGP fingerprint." >&2
-  exit 1
-fi
 if ! [[ "${staging_run_id}" =~ ^[0-9]+$ ]] || ! [[ "${release_run_id}" =~ ^[0-9]+$ ]]; then
   echo "Staging and release run IDs must be numeric." >&2
   exit 1
@@ -34,6 +30,10 @@ if [ ! -x "${appimagetool}" ]; then
 fi
 if [ ! -f "${runtime_file}" ] || [ -L "${runtime_file}" ]; then
   echo "Pinned AppImage runtime is missing: ${runtime_file}" >&2
+  exit 1
+fi
+if [ ! -f "${expected_public_key}" ] || [ -L "${expected_public_key}" ]; then
+  echo "Expected public release key is missing: ${expected_public_key}" >&2
   exit 1
 fi
 if [ -e "${output_dir}" ]; then
@@ -73,7 +73,23 @@ cleanup() {
 }
 trap cleanup EXIT
 
+mapfile -t expected_primary_fingerprints < <(
+  gpg --batch --with-colons --show-keys "${expected_public_key}" |
+    awk -F: '$1 == "pub" { want_fingerprint = 1; next }
+      want_fingerprint && $1 == "fpr" { print toupper($10); want_fingerprint = 0 }'
+)
+if [ "${#expected_primary_fingerprints[@]}" -ne 1 ]; then
+  echo "Committed public key must contain exactly one OpenPGP primary key." >&2
+  exit 1
+fi
+fingerprint="${expected_primary_fingerprints[0]}"
+if ! [[ "${fingerprint}" =~ ^([0-9A-F]{40}|[0-9A-F]{64})$ ]]; then
+  echo "Committed public key does not contain a full OpenPGP fingerprint." >&2
+  exit 1
+fi
+
 printf '%s' "${HOLDER_GPG_SIGNING_KEY_B64}" | base64 --decode > "${key_file}"
+gpg --batch --quiet --import "${expected_public_key}"
 gpg --batch --quiet --import "${key_file}"
 
 mapfile -t imported_primary_fingerprints < <(
@@ -109,11 +125,7 @@ if ! grep -q '^-----BEGIN PGP SIGNATURE-----$' "${output_dir}/${embedded_signatu
 fi
 
 cp "${provenance}" "${output_dir}/${provenance_name}"
-gpg --batch --armor --export "${fingerprint}" > "${output_dir}/${public_key_name}"
-if [ ! -s "${output_dir}/${public_key_name}" ]; then
-  echo "Could not export the public release key." >&2
-  exit 1
-fi
+cp "${expected_public_key}" "${output_dir}/${public_key_name}"
 
 jq -n \
   --arg version "${APPIMAGE_VERSION}" \

@@ -20,3 +20,13 @@ See the HolderTeam GitHub organisation for the complete source.
 The `Promote Windows dev build` workflow can publish a self-signed Windows tester installer from a successful `HolderTeam/holder-staging` Windows staging run.
 
 This is for prerelease testing only. It does not replace the final Windows signing path.
+
+## Linux AppImage release candidates
+
+The `Sign Linux AppImage release candidate` workflow verifies and signs one exact
+successful `HolderTeam/holder-staging` AppImage run. It emits a tested,
+OpenPGP-signed candidate with checksums, provenance, and a GitHub artifact
+attestation; it does not publish a GitHub release.
+
+The protected-environment setup and verification process are documented in
+[`docs/linux-appimage-signing.md`](docs/linux-appimage-signing.md).

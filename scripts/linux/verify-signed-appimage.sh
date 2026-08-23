@@ -3,13 +3,18 @@
 set -euo pipefail
 
 if [ "$#" -ne 3 ]; then
-  echo "Usage: $0 CANDIDATE_DIR EXPECTED_VERSION EXPECTED_PRIMARY_FINGERPRINT" >&2
+  echo "Usage: $0 CANDIDATE_DIR EXPECTED_VERSION EXPECTED_PUBLIC_KEY" >&2
   exit 2
 fi
 
 candidate_dir="$(realpath "$1")"
 expected_version="$2"
-expected_fingerprint="$(printf '%s' "$3" | tr -d '[:space:]' | tr '[:lower:]' '[:upper:]')"
+expected_public_key="$(realpath "$3")"
+
+if [ ! -f "${expected_public_key}" ] || [ -L "${expected_public_key}" ]; then
+  echo "Expected public release key is missing: ${expected_public_key}" >&2
+  exit 1
+fi
 
 signed_name="Holder-${expected_version}-x86_64.AppImage"
 provenance_name="Holder-${expected_version}-provenance.json"
@@ -51,6 +56,22 @@ trap cleanup EXIT
 chmod 0700 "${validation_gnupg_home}"
 
 export GNUPGHOME="${validation_gnupg_home}"
+if ! cmp -s "${expected_public_key}" "${candidate_dir}/${public_key_name}"; then
+  echo "Candidate public key differs from the public key committed to holder-release." >&2
+  exit 1
+fi
+
+mapfile -t expected_primary_fingerprints < <(
+  gpg --batch --with-colons --show-keys "${expected_public_key}" |
+    awk -F: '$1 == "pub" { want_fingerprint = 1; next }
+      want_fingerprint && $1 == "fpr" { print toupper($10); want_fingerprint = 0 }'
+)
+if [ "${#expected_primary_fingerprints[@]}" -ne 1 ]; then
+  echo "Committed public key must contain exactly one OpenPGP primary key." >&2
+  exit 1
+fi
+expected_fingerprint="${expected_primary_fingerprints[0]}"
+
 gpg --batch --quiet --import "${candidate_dir}/${public_key_name}"
 mapfile -t public_primary_fingerprints < <(
   gpg --batch --with-colons --list-keys |

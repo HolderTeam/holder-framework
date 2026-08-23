@@ -140,7 +140,6 @@ jobs:
 
       - name: Sign AppImage and checksum manifest
         env:
-          EXPECTED_FINGERPRINT: ${{ vars.HOLDER_GPG_SIGNING_FINGERPRINT }}
           HOLDER_GPG_SIGNING_KEY_B64: ${{ secrets.HOLDER_GPG_SIGNING_KEY_B64 }}
           HOLDER_GPG_SIGNING_PASSPHRASE: ${{ secrets.HOLDER_GPG_SIGNING_PASSPHRASE }}
         run: |
@@ -150,7 +149,7 @@ jobs:
             out/linux-release-candidate \
             out/tools/appimagetool-x86_64.AppImage \
             out/tools/runtime-x86_64 \
-            "${EXPECTED_FINGERPRINT}" \
+            keys/holder-linux-release.asc \
             "${{ inputs.staging_repository }}" \
             "${{ inputs.staging_run_id }}" \
             "${GITHUB_REPOSITORY}" \
@@ -160,14 +159,13 @@ jobs:
       # signing script also destroys its temporary GnuPG home before returning.
       - name: Verify signature and smoke-test signed AppImage
         env:
-          EXPECTED_FINGERPRINT: ${{ vars.HOLDER_GPG_SIGNING_FINGERPRINT }}
           EXPECTED_VERSION: ${{ inputs.expected_version }}
         run: |
           set -euo pipefail
           scripts/linux/verify-signed-appimage.sh \
             out/linux-release-candidate \
             "${EXPECTED_VERSION}" \
-            "${EXPECTED_FINGERPRINT}"
+            keys/holder-linux-release.asc
 
       - name: Create GitHub artifact attestation
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
@@ -182,12 +180,16 @@ jobs:
           candidate_dir="out/linux-release-candidate"
           appimage="Holder-${EXPECTED_VERSION}-x86_64.AppImage"
           checksum="$(sha256sum "${candidate_dir}/${appimage}" | cut -d ' ' -f 1)"
+          fingerprint="$(
+            gpg --batch --with-colons --show-keys keys/holder-linux-release.asc |
+              awk -F: '$1 == "fpr" { print $10; exit }'
+          )"
           {
             echo "## Signed Linux release candidate"
             echo
             echo "- Asset: \`${appimage}\`"
             echo "- SHA-256: \`${checksum}\`"
-            echo "- OpenPGP fingerprint: \`${{ vars.HOLDER_GPG_SIGNING_FINGERPRINT }}\`"
+            echo "- OpenPGP fingerprint: \`${fingerprint}\`"
             echo "- GitHub artifact attestation: created"
             echo
             echo "This workflow does not publish a GitHub release. Promotion remains a separate operation."
