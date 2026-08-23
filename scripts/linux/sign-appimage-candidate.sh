@@ -151,13 +151,7 @@ jq -n \
 
 (
   cd "${output_dir}"
-  sha256sum \
-    "${signed_name}" \
-    "${provenance_name}" \
-    "${metadata_name}" \
-    "${public_key_name}" \
-    "${embedded_signature_name}" \
-    > "${checksums_name}"
+  sha256sum "${signed_name}" > "${checksums_name}"
 )
 
 printf '%s' "${HOLDER_GPG_SIGNING_PASSPHRASE}" |

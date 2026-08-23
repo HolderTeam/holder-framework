@@ -34,7 +34,7 @@ jobs:
 
     steps:
       - name: Download Windows tester installer
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: ${{ inputs.staging_artifact_name }}
           path: downloads/windows-dev
@@ -129,7 +129,7 @@ jobs:
 
           find "${payload_dir}" -maxdepth 1 -type f -print | sort
 
-      - name: Create or update Windows dev prerelease
+      - name: Create or upload to Windows dev prerelease
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_REPOSITORY: ${{ github.repository }}
@@ -141,12 +141,7 @@ jobs:
           mapfile -t assets < <(find "${payload_dir}" -maxdepth 1 -type f ! -name 'release-notes.md' | sort)
 
           if gh release view "${RELEASE_TAG}" --repo "${RELEASE_REPOSITORY}" >/dev/null 2>&1; then
-            echo "Updating existing prerelease ${RELEASE_TAG}"
-            gh release edit "${RELEASE_TAG}" \
-              --repo "${RELEASE_REPOSITORY}" \
-              --title "${RELEASE_TITLE}" \
-              --notes-file "${notes}" \
-              --prerelease
+            echo "Uploading to existing release ${RELEASE_TAG} without changing its title or description."
             gh release upload "${RELEASE_TAG}" \
               --repo "${RELEASE_REPOSITORY}" \
               --clobber \

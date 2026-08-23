@@ -73,7 +73,8 @@ The uploaded artifact is named
 - The staged component provenance.
 - Signing metadata identifying both workflow runs and the key fingerprint.
 - The armored public key and a copy of the embedded AppImage signature.
-- A SHA-256 manifest and detached OpenPGP signature over that manifest.
+- A one-file SHA-256 manifest for the AppImage and a detached OpenPGP signature
+  over that manifest.
 
 ## Independent verification
 
@@ -90,3 +91,20 @@ gh attestation verify Holder-<version>-x86_64.AppImage \
 The detached manifest signature is the straightforward end-user verification
 path. The AppImage also contains an embedded OpenPGP signature for AppImage-aware
 tools.
+
+## Promoting to a draft release
+
+Run `Promote Linux AppImage to draft release` with the exact version and
+successful signing workflow run ID. The workflow re-verifies the signature,
+provenance, smoke test, and GitHub artifact attestation before uploading these
+release-facing files:
+
+- `Holder-<version>-x86_64.AppImage`
+- `Holder-<version>-SHA256SUMS`
+- `Holder-<version>-SHA256SUMS.asc`
+- `Holder-linux-release-key.asc`
+
+The default tag is `v<version>`. An override is accepted only when it still
+identifies the exact same version. The workflow uses an existing draft for that
+tag or creates one with placeholder notes. It refuses to alter a published
+release and never edits an existing draft's title or description.

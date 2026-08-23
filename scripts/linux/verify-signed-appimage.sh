@@ -41,6 +41,14 @@ if [ ! -x "${candidate_dir}/${signed_name}" ]; then
   exit 1
 fi
 
+mapfile -t checksum_entries < <(awk '{print $2}' "${candidate_dir}/${checksums_name}")
+if [ "${#checksum_entries[@]}" -ne 1 ] ||
+   [ "${checksum_entries[0]}" != "${signed_name}" ]; then
+  echo "Release checksum manifest must contain exactly the signed AppImage." >&2
+  cat "${candidate_dir}/${checksums_name}" >&2
+  exit 1
+fi
+
 (
   cd "${candidate_dir}"
   sha256sum -c "${checksums_name}"

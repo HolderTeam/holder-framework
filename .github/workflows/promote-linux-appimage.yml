@@ -1,0 +1,312 @@
+name: Promote Linux AppImage to draft release
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Exact signed AppImage version, for example 0.2.0 or 0.2.0-dev
+        required: true
+        type: string
+      signing_run_id:
+        description: Successful holder-release signing workflow run ID
+        required: true
+        type: string
+      release_tag:
+        description: Optional exact release tag; blank uses v<expected_version>
+        required: false
+        default: ""
+        type: string
+
+run-name: Promote Linux AppImage ${{ inputs.expected_version }} to draft release
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: holder-draft-release-promotion
+  cancel-in-progress: false
+
+jobs:
+  verify_candidate:
+    name: Verify signed candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      attestations: read
+      contents: read
+    outputs:
+      artifact_name: ${{ steps.release.outputs.artifact_name }}
+      release_tag: ${{ steps.release.outputs.release_tag }}
+
+    steps:
+      - name: Check out release policy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Validate promotion inputs
+        id: release
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          RELEASE_TAG_INPUT: ${{ inputs.release_tag }}
+          SIGNING_RUN_ID: ${{ inputs.signing_run_id }}
+        run: |
+          set -euo pipefail
+
+          semver_pattern='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+          if ! [[ "${EXPECTED_VERSION}" =~ ${semver_pattern} ]]; then
+            echo "Expected version is not semantic versioning: ${EXPECTED_VERSION}" >&2
+            exit 1
+          fi
+          if ! [[ "${SIGNING_RUN_ID}" =~ ^[0-9]+$ ]]; then
+            echo "Signing run ID must be numeric: ${SIGNING_RUN_ID}" >&2
+            exit 1
+          fi
+
+          release_tag="${RELEASE_TAG_INPUT:-v${EXPECTED_VERSION}}"
+          case "${release_tag}" in
+            "v${EXPECTED_VERSION}" | "${EXPECTED_VERSION}") ;;
+            *)
+              echo "Release tag ${release_tag} does not identify exact version ${EXPECTED_VERSION}." >&2
+              exit 1
+              ;;
+          esac
+
+          {
+            echo "artifact_name=Holder-linux-appimage-signed-${EXPECTED_VERSION}"
+            echo "release_tag=${release_tag}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Download exact signed AppImage artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ steps.release.outputs.artifact_name }}
+          path: downloads/linux-signed
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.signing_run_id }}
+
+      - name: Install verification dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gnupg jq
+
+      - name: Verify signed candidate and provenance
+        run: |
+          set -euo pipefail
+
+          candidate_dir="downloads/linux-signed"
+          appimage="${candidate_dir}/Holder-${EXPECTED_VERSION}-x86_64.AppImage"
+          metadata="${candidate_dir}/Holder-${EXPECTED_VERSION}-signing-metadata.json"
+          chmod 0755 "${appimage}"
+
+          scripts/linux/verify-signed-appimage.sh \
+            "${candidate_dir}" \
+            "${EXPECTED_VERSION}" \
+            keys/holder-linux-release.asc
+
+          jq -e \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg run_id "${SIGNING_RUN_ID}" \
+            '.signing_workflow.repository == $repository and
+             .signing_workflow.run_id == $run_id' \
+            "${metadata}" >/dev/null
+
+          GH_TOKEN="${GITHUB_TOKEN}" gh attestation verify \
+            "${appimage}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/sign-linux-appimage.yml"
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          GITHUB_TOKEN: ${{ github.token }}
+          SIGNING_RUN_ID: ${{ inputs.signing_run_id }}
+
+  promote:
+    name: Add assets to exact draft
+    needs: verify_candidate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+
+    steps:
+      - name: Check out release policy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Download verified signed artifact again
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ needs.verify_candidate.outputs.artifact_name }}
+          path: downloads/linux-signed
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ inputs.signing_run_id }}
+
+      - name: Install release dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y gnupg jq
+
+      - name: Re-verify payload without executing it
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          SIGNING_RUN_ID: ${{ inputs.signing_run_id }}
+        run: |
+          set -euo pipefail
+
+          candidate_dir="downloads/linux-signed"
+          appimage_name="Holder-${EXPECTED_VERSION}-x86_64.AppImage"
+          checksums_name="Holder-${EXPECTED_VERSION}-SHA256SUMS"
+          public_key_name="Holder-linux-release-key.asc"
+          metadata="${candidate_dir}/Holder-${EXPECTED_VERSION}-signing-metadata.json"
+
+          if ! cmp -s \
+            keys/holder-linux-release.asc \
+            "${candidate_dir}/${public_key_name}"; then
+            echo "Candidate public key differs from holder-release policy." >&2
+            exit 1
+          fi
+
+          mapfile -t checksum_entries < <(
+            awk '{print $2}' "${candidate_dir}/${checksums_name}"
+          )
+          if [ "${#checksum_entries[@]}" -ne 1 ] ||
+             [ "${checksum_entries[0]}" != "${appimage_name}" ]; then
+            echo "Release checksum manifest must contain exactly ${appimage_name}." >&2
+            exit 1
+          fi
+
+          verification_home="$(mktemp -d)"
+          cleanup() {
+            GNUPGHOME="${verification_home}" gpgconf --kill gpg-agent >/dev/null 2>&1 || true
+            rm -rf "${verification_home}"
+          }
+          trap cleanup EXIT
+          chmod 0700 "${verification_home}"
+          export GNUPGHOME="${verification_home}"
+          gpg --batch --quiet --import keys/holder-linux-release.asc
+          gpg --batch --verify \
+            "${candidate_dir}/${checksums_name}.asc" \
+            "${candidate_dir}/${checksums_name}"
+          (
+            cd "${candidate_dir}"
+            sha256sum -c "${checksums_name}"
+          )
+
+          jq -e \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg run_id "${SIGNING_RUN_ID}" \
+            '.signing_workflow.repository == $repository and
+             .signing_workflow.run_id == $run_id' \
+            "${metadata}" >/dev/null
+
+      - name: Prepare minimal Linux release payload
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          set -euo pipefail
+
+          candidate_dir="downloads/linux-signed"
+          payload_dir="out/linux-release-payload"
+          install -d "${payload_dir}"
+
+          for filename in \
+            "Holder-${EXPECTED_VERSION}-x86_64.AppImage" \
+            "Holder-${EXPECTED_VERSION}-SHA256SUMS" \
+            "Holder-${EXPECTED_VERSION}-SHA256SUMS.asc" \
+            "Holder-linux-release-key.asc"; do
+            cp "${candidate_dir}/${filename}" "${payload_dir}/${filename}"
+          done
+          chmod 0755 "${payload_dir}/Holder-${EXPECTED_VERSION}-x86_64.AppImage"
+
+          find "${payload_dir}" -maxdepth 1 -type f -printf '%f\n' | sort
+
+      - name: Resolve or create exact draft release
+        id: draft
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.verify_candidate.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+
+          releases="$(gh api "repos/${RELEASE_REPOSITORY}/releases?per_page=100")"
+          matching_release="$(
+            jq -c --arg tag "${RELEASE_TAG}" \
+              '[.[] | select(.tag_name == $tag)]' <<<"${releases}"
+          )"
+          match_count="$(jq 'length' <<<"${matching_release}")"
+          if [ "${match_count}" -gt 1 ]; then
+            echo "GitHub returned more than one release for tag ${RELEASE_TAG}." >&2
+            exit 1
+          fi
+
+          if [ "${match_count}" -eq 1 ]; then
+            if [ "$(jq -r '.[0].draft' <<<"${matching_release}")" != "true" ]; then
+              echo "Release ${RELEASE_TAG} is already published; refusing to alter it." >&2
+              exit 1
+            fi
+            release_url="$(jq -r '.[0].html_url' <<<"${matching_release}")"
+            echo "Using existing draft ${RELEASE_TAG} without changing its title or description."
+          else
+            create_args=(
+              "${RELEASE_TAG}"
+              --repo "${RELEASE_REPOSITORY}"
+              --draft
+              --title "Holder ${EXPECTED_VERSION}"
+              --notes "Release notes pending. Edit this draft before publishing."
+            )
+            if [[ "${EXPECTED_VERSION}" == *-* ]]; then
+              create_args+=(--prerelease)
+            fi
+            gh release create "${create_args[@]}"
+            release_url="$(
+              gh release view "${RELEASE_TAG}" \
+                --repo "${RELEASE_REPOSITORY}" \
+                --json url \
+                --jq '.url'
+            )"
+            echo "Created draft ${RELEASE_TAG}."
+          fi
+
+          {
+            echo "release_url=${release_url}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Upload Linux assets without editing release notes
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.verify_candidate.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t assets < <(
+            find out/linux-release-payload -maxdepth 1 -type f | sort
+          )
+          gh release upload "${RELEASE_TAG}" \
+            --repo "${RELEASE_REPOSITORY}" \
+            --clobber \
+            "${assets[@]}"
+
+      - name: Summarize promotion
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+          RELEASE_TAG: ${{ needs.verify_candidate.outputs.release_tag }}
+          RELEASE_URL: ${{ steps.draft.outputs.release_url }}
+          SIGNING_RUN_ID: ${{ inputs.signing_run_id }}
+        run: |
+          set -euo pipefail
+
+          {
+            echo "## Linux AppImage added to draft"
+            echo
+            echo "- Version: \`${EXPECTED_VERSION}\`"
+            echo "- Draft: [${RELEASE_TAG}](${RELEASE_URL})"
+            echo "- Signed candidate run: [${GITHUB_REPOSITORY}#${SIGNING_RUN_ID}](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${SIGNING_RUN_ID})"
+            echo "- Existing title and description: preserved"
+          } >> "${GITHUB_STEP_SUMMARY}"

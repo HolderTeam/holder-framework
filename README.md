@@ -30,3 +30,8 @@ attestation; it does not publish a GitHub release.
 
 The protected-environment setup and verification process are documented in
 [`docs/linux-appimage-signing.md`](docs/linux-appimage-signing.md).
+
+After signing, `Promote Linux AppImage to draft release` verifies one exact
+signing run and adds the AppImage, checksum manifest, manifest signature, and
+public key to the draft for that exact version tag. Existing release titles and
+descriptions are never edited by the workflow.
