@@ -1,0 +1,202 @@
+name: Sign Linux AppImage release candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_version:
+        description: Exact Holder product version expected in the staged package, for example 2.0.0-dev
+        required: true
+        type: string
+      staging_run_id:
+        description: Successful holder-staging Linux AppImage workflow run ID to sign
+        required: true
+        type: string
+      staging_repository:
+        description: Repository containing the staged Linux AppImage artifact
+        required: false
+        default: HolderTeam/holder-staging
+        type: string
+      staging_artifact_name:
+        description: Name of the staged Linux AppImage artifact
+        required: false
+        default: Holder-linux-appimage-staged
+        type: string
+
+run-name: Sign Linux AppImage ${{ inputs.expected_version }} from staging run ${{ inputs.staging_run_id }}
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: linux-appimage-signing
+  cancel-in-progress: false
+
+jobs:
+  verify-staging:
+    name: Verify staged package
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out release policy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Download exact staged AppImage artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.staging_artifact_name }}
+          path: downloads/linux-staged
+          github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          repository: ${{ inputs.staging_repository }}
+          run-id: ${{ inputs.staging_run_id }}
+
+      - name: Install verification dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y jq
+
+      - name: Verify checksums, archive, and provenance
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          set -euo pipefail
+          scripts/linux/verify-staged-appimage.sh \
+            downloads/linux-staged \
+            "${EXPECTED_VERSION}" \
+            work/verified
+
+          provenance="work/verified/provenance.json"
+          {
+            echo "## Verified staging input"
+            echo
+            echo "- Product version: \`${EXPECTED_VERSION}\`"
+            echo "- Staging run: [${{ inputs.staging_repository }}#${{ inputs.staging_run_id }}](https://github.com/${{ inputs.staging_repository }}/actions/runs/${{ inputs.staging_run_id }})"
+            echo "- Desktop: \`$(jq -r '.desktop.repository + "#" + .desktop.run_id + " @ " + .desktop.commit' "${provenance}")\`"
+            echo "- Backend: \`$(jq -r '.backend.repository + "#" + .backend.run_id + " @ " + .backend.commit' "${provenance}")\`"
+            echo "- Daemon API: \`$(jq -r '.backend.api_version' "${provenance}")\`"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  sign:
+    name: Sign and test release candidate
+    needs: verify-staging
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    environment: linux-release-signing
+    permissions:
+      actions: read
+      attestations: write
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Check out protected release policy
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Download exact staged AppImage artifact again
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ${{ inputs.staging_artifact_name }}
+          path: downloads/linux-staged
+          github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          repository: ${{ inputs.staging_repository }}
+          run-id: ${{ inputs.staging_run_id }}
+
+      - name: Install signing dependencies
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y curl gnupg jq
+
+      - name: Re-verify signing input
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          set -euo pipefail
+          scripts/linux/verify-staged-appimage.sh \
+            downloads/linux-staged \
+            "${EXPECTED_VERSION}" \
+            work/signing-input
+
+      - name: Download pinned AppImage tooling
+        env:
+          APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+          APPIMAGETOOL_URL: https://github.com/AppImage/appimagetool/releases/download/1.9.1/appimagetool-x86_64.AppImage
+          APPIMAGE_RUNTIME_SHA256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+          APPIMAGE_RUNTIME_URL: https://github.com/AppImage/type2-runtime/releases/download/20251108/runtime-x86_64
+        run: |
+          set -euo pipefail
+          install -d out/tools
+          curl --fail --location --retry 3 \
+            "${APPIMAGETOOL_URL}" \
+            -o out/tools/appimagetool-x86_64.AppImage
+          curl --fail --location --retry 3 \
+            "${APPIMAGE_RUNTIME_URL}" \
+            -o out/tools/runtime-x86_64
+          echo "${APPIMAGETOOL_SHA256}  out/tools/appimagetool-x86_64.AppImage" | sha256sum -c -
+          echo "${APPIMAGE_RUNTIME_SHA256}  out/tools/runtime-x86_64" | sha256sum -c -
+          chmod 0755 out/tools/appimagetool-x86_64.AppImage
+
+      - name: Sign AppImage and checksum manifest
+        env:
+          EXPECTED_FINGERPRINT: ${{ vars.HOLDER_GPG_SIGNING_FINGERPRINT }}
+          HOLDER_GPG_SIGNING_KEY_B64: ${{ secrets.HOLDER_GPG_SIGNING_KEY_B64 }}
+          HOLDER_GPG_SIGNING_PASSPHRASE: ${{ secrets.HOLDER_GPG_SIGNING_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          scripts/linux/sign-appimage-candidate.sh \
+            work/signing-input \
+            out/linux-release-candidate \
+            out/tools/appimagetool-x86_64.AppImage \
+            out/tools/runtime-x86_64 \
+            "${EXPECTED_FINGERPRINT}" \
+            "${{ inputs.staging_repository }}" \
+            "${{ inputs.staging_run_id }}" \
+            "${GITHUB_REPOSITORY}" \
+            "${GITHUB_RUN_ID}"
+
+      # The private key and passphrase were scoped to the preceding step. The
+      # signing script also destroys its temporary GnuPG home before returning.
+      - name: Verify signature and smoke-test signed AppImage
+        env:
+          EXPECTED_FINGERPRINT: ${{ vars.HOLDER_GPG_SIGNING_FINGERPRINT }}
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          set -euo pipefail
+          scripts/linux/verify-signed-appimage.sh \
+            out/linux-release-candidate \
+            "${EXPECTED_VERSION}" \
+            "${EXPECTED_FINGERPRINT}"
+
+      - name: Create GitHub artifact attestation
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with:
+          subject-path: out/linux-release-candidate/Holder-${{ inputs.expected_version }}-x86_64.AppImage
+
+      - name: Summarize signed candidate
+        env:
+          EXPECTED_VERSION: ${{ inputs.expected_version }}
+        run: |
+          set -euo pipefail
+          candidate_dir="out/linux-release-candidate"
+          appimage="Holder-${EXPECTED_VERSION}-x86_64.AppImage"
+          checksum="$(sha256sum "${candidate_dir}/${appimage}" | cut -d ' ' -f 1)"
+          {
+            echo "## Signed Linux release candidate"
+            echo
+            echo "- Asset: \`${appimage}\`"
+            echo "- SHA-256: \`${checksum}\`"
+            echo "- OpenPGP fingerprint: \`${{ vars.HOLDER_GPG_SIGNING_FINGERPRINT }}\`"
+            echo "- GitHub artifact attestation: created"
+            echo
+            echo "This workflow does not publish a GitHub release. Promotion remains a separate operation."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload signed release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: Holder-linux-appimage-signed-${{ inputs.expected_version }}
+          path: out/linux-release-candidate/*
+          if-no-files-found: error
+          retention-days: 30
