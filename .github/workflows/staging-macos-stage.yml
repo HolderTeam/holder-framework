@@ -90,6 +90,7 @@ jobs:
             local candidate_run_id
             local candidate_run_ids
             if ! candidate_run_ids="$(gh api \
+              --method GET \
               "repos/${repository}/actions/runs" \
               -f branch="${branch}" \
               -f status=success \

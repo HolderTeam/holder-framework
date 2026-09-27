@@ -90,6 +90,7 @@ jobs:
             }
 
             $runsJson = gh api `
+              -X GET `
               "repos/$Repository/actions/runs" `
               -f "branch=$Branch" `
               -f "status=success" `
