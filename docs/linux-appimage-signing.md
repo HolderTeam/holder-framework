@@ -104,7 +104,7 @@ release-facing files:
 - `Holder-<version>-SHA256SUMS.asc`
 - `Holder-linux-release-key.asc`
 
-The default tag is `v<version>`. An override is accepted only when it still
+The default tag is `holder-v<version>`, matching the macOS release tag. An override is accepted only when it still
 identifies the exact same version. The workflow uses an existing draft for that
 tag or creates one with placeholder notes. It refuses to alter a published
 release and never edits an existing draft's title or description.

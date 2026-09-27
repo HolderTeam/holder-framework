@@ -12,7 +12,7 @@ on:
         required: true
         type: string
       release_tag:
-        description: Optional exact release tag; blank uses v<expected_version>
+        description: Optional exact release tag; blank uses holder-v<expected_version>
         required: false
         default: ""
         type: string
@@ -63,9 +63,9 @@ jobs:
             exit 1
           fi
 
-          release_tag="${RELEASE_TAG_INPUT:-v${EXPECTED_VERSION}}"
+          release_tag="${RELEASE_TAG_INPUT:-holder-v${EXPECTED_VERSION}}"
           case "${release_tag}" in
-            "v${EXPECTED_VERSION}" | "${EXPECTED_VERSION}") ;;
+            "holder-v${EXPECTED_VERSION}" | "v${EXPECTED_VERSION}" | "${EXPECTED_VERSION}") ;;
             *)
               echo "Release tag ${release_tag} does not identify exact version ${EXPECTED_VERSION}." >&2
               exit 1
