@@ -1,4 +1,4 @@
-name: Promote Linux AppImage to draft release
+name: Promote Linux AppImage to release
 
 on:
   workflow_dispatch:
@@ -16,8 +16,13 @@ on:
         required: false
         default: ""
         type: string
+      allow_published_prerelease:
+        description: Allow adding assets to an existing published prerelease for the exact version
+        required: false
+        default: false
+        type: boolean
 
-run-name: Promote Linux AppImage ${{ inputs.expected_version }} to draft release
+run-name: Promote Linux AppImage ${{ inputs.expected_version }} to release
 
 permissions:
   actions: read
@@ -123,7 +128,7 @@ jobs:
           SIGNING_RUN_ID: ${{ inputs.signing_run_id }}
 
   promote:
-    name: Add assets to exact draft
+    name: Add assets to exact release
     needs: verify_candidate
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -224,9 +229,10 @@ jobs:
 
           find "${payload_dir}" -maxdepth 1 -type f -printf '%f\n' | sort
 
-      - name: Resolve or create exact draft release
+      - name: Resolve or create exact release
         id: draft
         env:
+          ALLOW_PUBLISHED_PRERELEASE: ${{ inputs.allow_published_prerelease }}
           EXPECTED_VERSION: ${{ inputs.expected_version }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_REPOSITORY: ${{ github.repository }}
@@ -246,12 +252,15 @@ jobs:
           fi
 
           if [ "${match_count}" -eq 1 ]; then
-            if [ "$(jq -r '.[0].draft' <<<"${matching_release}")" != "true" ]; then
-              echo "Release ${RELEASE_TAG} is already published; refusing to alter it." >&2
+            is_draft="$(jq -r '.[0].draft' <<<"${matching_release}")"
+            is_prerelease="$(jq -r '.[0].prerelease' <<<"${matching_release}")"
+            if [ "${is_draft}" != "true" ] &&
+               { [ "${ALLOW_PUBLISHED_PRERELEASE}" != "true" ] || [ "${is_prerelease}" != "true" ]; }; then
+              echo "Release ${RELEASE_TAG} is already published; only an explicitly allowed prerelease may be updated." >&2
               exit 1
             fi
             release_url="$(jq -r '.[0].html_url' <<<"${matching_release}")"
-            echo "Using existing draft ${RELEASE_TAG} without changing its title or description."
+            echo "Using existing release ${RELEASE_TAG} without changing its title or description."
           else
             create_args=(
               "${RELEASE_TAG}"
@@ -303,10 +312,10 @@ jobs:
           set -euo pipefail
 
           {
-            echo "## Linux AppImage added to draft"
+            echo "## Linux AppImage added to release"
             echo
             echo "- Version: \`${EXPECTED_VERSION}\`"
-            echo "- Draft: [${RELEASE_TAG}](${RELEASE_URL})"
+            echo "- Release: [${RELEASE_TAG}](${RELEASE_URL})"
             echo "- Signed candidate run: [${GITHUB_REPOSITORY}#${SIGNING_RUN_ID}](https://github.com/${GITHUB_REPOSITORY}/actions/runs/${SIGNING_RUN_ID})"
             echo "- Existing title and description: preserved"
           } >> "${GITHUB_STEP_SUMMARY}"
