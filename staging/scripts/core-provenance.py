@@ -35,12 +35,12 @@ def load_pin(path):
     return pin
 
 
-def verify(selection, core, desktop_commit, backend_commit, pin=None):
+def verify(selection, core, desktop_commit, backend_commit, pin=None, platform="linux", architecture="x86_64"):
     require(core["commit"] == selection["commit"],
             "Backend core revision differs from the selected SDK; choose a matching backend run")
     require(core["version"] == selection["version"], "Backend core version differs from selected SDK")
-    require(core["platform"] == "linux" and core["architecture"] == "x86_64",
-            "AppImage requires the Linux x86_64 SDK")
+    require(core["platform"] == platform and core["architecture"] == architecture,
+            f"Package requires the {platform} {architecture} SDK")
     assets = [asset for asset in selection["assets"]
               if asset["platform"] == core["platform"] and
               asset["architecture"] == core["architecture"] and
@@ -63,6 +63,8 @@ def main():
     parser.add_argument("--desktop-root")
     parser.add_argument("--backend-root")
     parser.add_argument("--output")
+    parser.add_argument("--core-manifest")
+    parser.add_argument("--platform", default="linux", choices=("linux", "windows", "macos"))
     args = parser.parse_args()
     pin = load_pin(args.release_manifest) if args.release_manifest else None
     if args.command == "prepare":
@@ -84,12 +86,18 @@ def main():
                 require("\n" not in value and "\r" not in value, "Inputs must be single lines")
                 output.write(f"{key}={value}\n")
     else:
-        desktop = Path(args.desktop_root)
-        backend = Path(args.backend_root)
+        desktop_commit = backend_commit = None
+        if args.desktop_root:
+            desktop_commit = (Path(args.desktop_root) / "release/holder-desktop-commit.txt").read_text().strip()
+        if args.backend_root:
+            backend = Path(args.backend_root)
+            backend_commit = (backend / "release/holder-daemon-commit.txt").read_text().strip()
+            core_path = backend / "usr/share/holder-daemon/core-build.json"
+        else:
+            core_path = Path(args.core_manifest)
         result = verify(json.loads(Path(args.selection).read_text()),
-                        json.loads((backend / "usr/share/holder-daemon/core-build.json").read_text()),
-                        (desktop / "release/holder-desktop-commit.txt").read_text().strip(),
-                        (backend / "release/holder-daemon-commit.txt").read_text().strip(), pin)
+                        json.loads(core_path.read_text()), desktop_commit, backend_commit, pin,
+                        args.platform, "arm64" if args.platform == "macos" else "x86_64")
         Path(args.output).write_text(json.dumps(result, indent=2) + "\n")
         print(f"Verified AppImage core SDK {result['commit']} ({result['build_type']})")
 

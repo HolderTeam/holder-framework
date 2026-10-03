@@ -6,19 +6,33 @@ Builds and stages Holder release candidates
 The Windows staged package workflow assembles the three Windows build outputs into a release-candidate layout:
 
 - `holder-desktop-windows` from `HolderTeam/holder-desktop`
-- `holder-daemon-windows-backend` from `HolderTeam/holder-daemon`
+- `holder-daemon-windows-backend` from core's downstream integration run
 - `holder-launcher-windows` from `HolderTeam/holder-launcher`
 
 Run it manually from:
 
 https://github.com/HolderTeam/holder-staging/actions/workflows/windows-stage.yml
 
-Use the successful workflow run IDs from the three input repositories. The desktop, daemon, and launcher repos use `main`.
+By default, staging resolves core's latest-green SDK and selects successful
+desktop, core daemon-integration and launcher runs on main. All selected
+artifacts must be unexpired. An explicit core tag/SHA and component run IDs
+support reproducible staging. Desktop installer metadata is checked out at the
+selected desktop run's commit. A backend built against another core revision
+is rejected.
 
-The workflow uploads two artifacts:
+The staged directory and installed package preserve `core-build.json` and
+`release/holder-core-provenance.json`; `release-candidate.json` records the
+core SDK asset checksum and publication. `backend_run_commit` identifies the
+workflow run revision (the core revision when selecting a core integration run).
+
+The normal workflow uploads two artifacts:
 
 - `Holder-windows-staged`: unsigned canonical staging directory for release signing.
 - `Holder-windows-test-signed-installer`: self-signed installer for trusted manual testing.
+
+Set `sign_test_installer=false` to validate an unsigned branch build without
+using the protected signing environment. This still assembles the staged
+directory and builds, installs and smoke-tests the unsigned installer.
 
 The self-signed tester installer is only for internal validation. It is not the release signing path. To test it on a clean Windows machine, import the included `Holder-windows-test-signing.cer` into the trusted certificate store only if the fingerprint matches `Holder-windows-test-signing-fingerprint.txt`.
 
@@ -99,6 +113,13 @@ is available. Otherwise it starts the bundled daemon, waits for it to become
 healthy, and stops that process when the desktop exits.
 
 ## Mac
+
+macOS staging uses the same latest-green selection and rejects mismatched
+backend SDKs. Artifact runs must be successful and unexpired, and desktop
+packaging metadata comes from the selected run's exact source commit. Core
+provenance is retained in `Holder.app/Contents/Resources/core-build.json`,
+`release/holder-core-provenance.json` and the release-candidate metadata.
+Explicit core and component run overrides support reproducible staging.
 
 How to manually test a prerelease development version of Holder, aka a "staged copy".
 

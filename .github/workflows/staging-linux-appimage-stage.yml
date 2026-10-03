@@ -81,7 +81,7 @@ jobs:
           if [[ -n "$RELEASE_MANIFEST" ]]; then
             options=(--release-manifest "sources/holder-staging/$RELEASE_MANIFEST")
           fi
-          python3 sources/holder-staging/scripts/linux-appimage/core-provenance.py prepare "${options[@]}"
+          python3 sources/holder-staging/scripts/core-provenance.py prepare "${options[@]}"
 
       - name: Resolve core SDK once
         id: core
@@ -295,7 +295,7 @@ jobs:
           if [[ -n "$RELEASE_MANIFEST" ]]; then
             options=(--release-manifest "sources/holder-staging/$RELEASE_MANIFEST")
           fi
-          python3 sources/holder-staging/scripts/linux-appimage/core-provenance.py verify \
+          python3 sources/holder-staging/scripts/core-provenance.py verify \
             --selection out/core-selection.json \
             --desktop-root work/desktop-root --backend-root work/backend-root \
             --output out/core-provenance.json "${options[@]}"

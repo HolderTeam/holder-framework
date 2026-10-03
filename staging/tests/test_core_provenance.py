@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location(
-    "core_provenance", Path(__file__).parents[1] / "scripts/linux-appimage/core-provenance.py")
+    "core_provenance", Path(__file__).parents[1] / "scripts/core-provenance.py")
 tool = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(tool)
 
@@ -42,8 +42,18 @@ class ProvenanceTests(unittest.TestCase):
 
     def test_wrong_platform_is_rejected(self):
         self.core["platform"] = "windows"
-        with self.assertRaisesRegex(ValueError, "Linux x86_64"):
+        with self.assertRaisesRegex(ValueError, "linux x86_64"):
             self.verify()
+
+    def test_windows_and_macos_verify_their_published_sdk(self):
+        for platform, architecture in (("windows", "x86_64"), ("macos", "arm64")):
+            with self.subTest(platform=platform):
+                core = {**self.core, "platform": platform, "architecture": architecture}
+                selection = copy.deepcopy(self.selection)
+                selection["assets"][0].update(platform=platform, architecture=architecture)
+                result = tool.verify(selection, core, None, None,
+                                     platform=platform, architecture=architecture)
+                self.assertEqual(result["platform"], platform)
 
     def test_unpublished_configuration_is_rejected(self):
         self.core["build_type"] = "Debug"
