@@ -37,11 +37,46 @@ both an AppImage and its assembled AppDir:
 
 https://github.com/HolderTeam/holder-staging/actions/workflows/linux-appimage-stage.yml
 
-All workflow inputs are optional. Running it without changes selects the newest
-successful `linux-desktop.yml` and `linux-backend.yml` runs on each repository's
-`main` branch that still have downloadable artifacts. Run IDs, repositories,
-branches, and the AppImage product version can be overridden when reproducing or
-testing a specific combination.
+All workflow inputs are optional. Development staging resolves core's
+`latest-green` SDK once and selects the newest successful desktop main artifact
+and core main `daemon-integration.yml` artifact that are still downloadable.
+Core's integration run contains the daemon package built and tested against
+that published SDK. Staging rejects a backend whose recorded core revision
+differs from the selected SDK, including while a newer downstream check is
+still running. Retry after that check passes; it does not silently use older core.
+
+Run IDs, repositories, branches, `core_ref` (tag or full SHA), and the AppImage
+version can be overridden for compatibility testing. Set `backend_repository`
+to `HolderTeam/holder-daemon` to select artifacts from daemon's `ci.yml` instead.
+An explicit older core selection needs a backend run built against that revision.
+
+For an RC or release, commit a JSON manifest to this repository and supply its
+relative path through `release_manifest`. The manifest controls the version,
+repositories, immutable component runs and core commit; leave run ID, product
+version and `core_ref` overrides at their defaults. For example:
+
+```json
+{
+  "appimage_version": "0.2.1-rc.1",
+  "core": {"commit": "<full core SHA>", "build_type": "RelWithDebInfo"},
+  "desktop": {
+    "repository": "HolderTeam/holder-desktop",
+    "run_id": "<successful desktop run ID>",
+    "commit": "<full desktop SHA>"
+  },
+  "backend": {
+    "repository": "HolderTeam/holder-core",
+    "run_id": "<successful daemon integration run ID>",
+    "commit": "<full daemon SHA>"
+  }
+}
+```
+
+Every component commit and the core build configuration are checked against
+the extracted artifacts. Current daemon CI artifacts use `RelWithDebInfo`;
+request `Release` only with an artifact actually built against the Release SDK.
+Component Actions artifacts expire, so stage the pinned candidate while they
+are available. Signing and promotion use that staged AppImage afterwards.
 
 Desktop and daemon package versions do not have to be identical. The workflow
 uses the compatibility metadata published in their artifacts instead: the daemon
@@ -52,7 +87,12 @@ The `Holder-linux-appimage-staged` artifact contains:
 
 - `Holder-<version>-x86_64.AppImage`
 - A matching AppDir archive for inspection and debugging
-- SHA-256 checksums and component provenance
+- SHA-256 checksums and component/core provenance, including the SDK asset digest
+
+The AppDir and final AppImage retain daemon's original `core-build.json` and
+`holder-core-provenance.json`. The external product provenance also includes
+the same core selection. A supplied framework release manifest is bundled in
+`usr/share/holder/release/holder-framework-release.json`.
 
 The AppImage launcher uses an already-running compatible Holder daemon when one
 is available. Otherwise it starts the bundled daemon, waits for it to become
