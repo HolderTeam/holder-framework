@@ -5,6 +5,10 @@ commit one manifest and pass the same `release_manifest` path to all three
 staging workflows. Each reads its platform entry, uses the shared product
 version/core pin, and bundles the original manifest in the package.
 
+`release-manifests/validation-0.2.1-rc.1.json` pins the branch artifacts used to
+validate this machinery. It is a test candidate, not a production release;
+its component inputs remain subject to Actions artifact retention.
+
 1. Select one published core commit and record its full SHA.
 2. Dispatch daemon `ci.yml` with that `core_ref` and `core_build_type=Release`.
 3. Dispatch desktop artifact workflows with `build_type=release`, and the
