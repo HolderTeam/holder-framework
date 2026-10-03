@@ -32,7 +32,12 @@ on:
         description: Repository containing the backend artifact
         required: true
         type: string
-        default: HolderTeam/holder-daemon
+        default: HolderTeam/holder-core
+      core_ref:
+        description: Core SDK selection; latest-green, tag or full SHA
+        required: false
+        default: latest-green
+        type: string
       launcher_repository:
         description: Repository containing the launcher artifact
         required: true
@@ -53,99 +58,38 @@ jobs:
         with:
           path: sources/holder-staging
 
-      - name: Check out holder-desktop metadata
-        uses: actions/checkout@v4
+      - name: Test SDK provenance and artifact selection
+        shell: bash
+        run: python3 -m unittest discover -s sources/holder-staging/tests -v
+
+      - name: Resolve core SDK once
+        id: core
+        uses: HolderTeam/holder-core/.github/actions/core-sdk@main
         with:
-          repository: ${{ inputs.desktop_repository }}
-          ref: ${{ inputs.desktop_ref }}
-          token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          path: sources/holder-desktop
+          command: resolve
+          core-ref: ${{ inputs.core_ref }}
 
       - name: Resolve artifact run IDs
         id: artifact_runs
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           DESKTOP_RUN_ID_INPUT: ${{ inputs.desktop_run_id }}
           BACKEND_RUN_ID_INPUT: ${{ inputs.backend_run_id }}
           LAUNCHER_RUN_ID_INPUT: ${{ inputs.launcher_run_id }}
-        run: |
-          set -euo pipefail
+          DESKTOP_REPOSITORY: ${{ inputs.desktop_repository }}
+          DESKTOP_REF: ${{ inputs.desktop_ref }}
+          BACKEND_REPOSITORY: ${{ inputs.backend_repository }}
+          LAUNCHER_REPOSITORY: ${{ inputs.launcher_repository }}
+        run: python3 sources/holder-staging/scripts/resolve-component-runs.py --platform macos
 
-          resolve_run_id() {
-            local provided_run_id="$1"
-            local repository="$2"
-            local workflow_label="$3"
-            local branch="$4"
-            local artifact="$5"
-
-            if [ -n "${provided_run_id}" ]; then
-              if ! [[ "${provided_run_id}" =~ ^[0-9]+$ ]]; then
-                echo "Provided run ID for ${artifact} is not numeric: ${provided_run_id}" >&2
-                return 1
-              fi
-              echo "${provided_run_id}"
-              return 0
-            fi
-
-            local candidate_run_id
-            local candidate_run_ids
-            if ! candidate_run_ids="$(gh api \
-              --method GET \
-              "repos/${repository}/actions/runs" \
-              -f branch="${branch}" \
-              -f status=success \
-              -f per_page=20 \
-              --jq '.workflow_runs[].id')"; then
-              echo "Could not list successful runs on ${repository}@${branch}" >&2
-              return 1
-            fi
-
-            for candidate_run_id in ${candidate_run_ids}; do
-              if ! [[ "${candidate_run_id}" =~ ^[0-9]+$ ]]; then
-                echo "Ignoring non-numeric run ID from GitHub API: ${candidate_run_id}" >&2
-                continue
-              fi
-
-              if gh api "repos/${repository}/actions/runs/${candidate_run_id}/artifacts" \
-                --jq '.artifacts[].name' \
-                | grep -Fxq "${artifact}"; then
-                echo "${candidate_run_id}"
-                return 0
-              fi
-            done
-
-            echo "No successful ${workflow_label} run on ${repository}@${branch} uploaded ${artifact}" >&2
-            return 1
-          }
-
-          desktop_run_id="$(resolve_run_id \
-            "${DESKTOP_RUN_ID_INPUT}" \
-            "${{ inputs.desktop_repository }}" \
-            "macos-desktop.yml" \
-            "${{ inputs.desktop_ref }}" \
-            "holder-desktop-macos")"
-          backend_run_id="$(resolve_run_id \
-            "${BACKEND_RUN_ID_INPUT}" \
-            "${{ inputs.backend_repository }}" \
-            "macos-backend.yml" \
-            "main" \
-            "holder-daemon-macos-backend")"
-          launcher_run_id="$(resolve_run_id \
-            "${LAUNCHER_RUN_ID_INPUT}" \
-            "${{ inputs.launcher_repository }}" \
-            "macos-launcher.yml" \
-            "main" \
-            "holder-launcher-macos")"
-
-          {
-            echo "desktop_run_id=${desktop_run_id}"
-            echo "backend_run_id=${backend_run_id}"
-            echo "launcher_run_id=${launcher_run_id}"
-          } >> "${GITHUB_OUTPUT}"
-
-          echo "Resolved holder-desktop macOS run: ${desktop_run_id}"
-          echo "Resolved holder-daemon macOS run: ${backend_run_id}"
-          echo "Resolved holder-launcher macOS run: ${launcher_run_id}"
+      - name: Check out holder-desktop metadata
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.desktop_repository }}
+          ref: ${{ steps.artifact_runs.outputs.desktop_commit }}
+          token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          path: sources/holder-desktop
 
       - name: Download desktop artifact
         uses: actions/download-artifact@v4
@@ -173,6 +117,13 @@ jobs:
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           repository: ${{ inputs.launcher_repository }}
           run-id: ${{ steps.artifact_runs.outputs.launcher_run_id }}
+
+      - name: Verify backend core provenance
+        shell: bash
+        run: |
+          python3 sources/holder-staging/scripts/core-provenance.py verify \
+            --selection out/core-selection.json --platform macos \
+            --core-manifest downloads/backend/core-build.json --output out/core-provenance.json
 
       - name: Install Homebrew runtime tools
         run: |
@@ -264,6 +215,8 @@ jobs:
           cp -a downloads/backend/config "${resources_dir}/config"
           cp -a downloads/backend/assets "${resources_dir}/assets"
           cp downloads/backend/openapi.yaml "${resources_dir}/openapi.yaml"
+          cp downloads/backend/core-build.json "${resources_dir}/core-build.json"
+          cp out/core-provenance.json "${metadata_dir}/holder-core-provenance.json"
 
           copy_tree_dereference_if_exists() {
             local source_dir="$1"
@@ -565,6 +518,9 @@ jobs:
           from datetime import datetime, timezone
 
           metadata = {
+              "core": json.load(open("out/core-provenance.json")),
+              "launcher_commit": "${{ steps.artifact_runs.outputs.launcher_commit }}",
+              "backend_run_commit": "${{ steps.artifact_runs.outputs.backend_commit }}",
               "platform": "macos",
               "version": os.environ["HOLDER_VERSION"],
               "created_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
@@ -660,6 +616,8 @@ jobs:
           check_executable "${resources_dir}/bin/holderctl"
           check_file "${resources_dir}/schema/schema.sql"
           check_file "${resources_dir}/openapi.yaml"
+          cmp downloads/backend/core-build.json "${resources_dir}/core-build.json"
+          cmp out/core-provenance.json "${resources_dir}/release/holder-core-provenance.json"
           check_file "${resources_dir}/share/glib-2.0/schemas/gschemas.compiled"
           check_file "${resources_dir}/share/gtksourceview-5/language-specs/language2.rng"
           check_file "${resources_dir}/share/icons/Adwaita/symbolic/actions/view-refresh-symbolic.svg"

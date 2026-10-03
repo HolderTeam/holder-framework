@@ -32,7 +32,17 @@ on:
         description: Repository containing the backend artifact
         required: true
         type: string
-        default: HolderTeam/holder-daemon
+        default: HolderTeam/holder-core
+      core_ref:
+        description: Core SDK selection; latest-green, tag or full SHA
+        required: false
+        default: latest-green
+        type: string
+      sign_test_installer:
+        description: Build the protected self-signed tester installer (disable for unsigned branch validation)
+        required: false
+        default: true
+        type: boolean
       launcher_repository:
         description: Repository containing the launcher artifact
         required: true
@@ -46,7 +56,7 @@ permissions:
 jobs:
   stage:
     runs-on: windows-latest
-    environment: windows-staging
+    environment: ${{ inputs.sign_test_installer && 'windows-staging' || '' }}
 
     steps:
       - name: Check out holder-staging
@@ -54,91 +64,38 @@ jobs:
         with:
           path: sources/holder-staging
 
-      - name: Check out holder-desktop metadata
-        uses: actions/checkout@v4
+      - name: Test SDK provenance and artifact selection
+        shell: bash
+        run: python3 -m unittest discover -s sources/holder-staging/tests -v
+
+      - name: Resolve core SDK once
+        id: core
+        uses: HolderTeam/holder-core/.github/actions/core-sdk@main
         with:
-          repository: ${{ inputs.desktop_repository }}
-          ref: ${{ inputs.desktop_ref }}
-          token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          path: sources/holder-desktop
+          command: resolve
+          core-ref: ${{ inputs.core_ref }}
 
       - name: Resolve artifact run IDs
         id: artifact_runs
-        shell: pwsh
+        shell: bash
         env:
           GH_TOKEN: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           DESKTOP_RUN_ID_INPUT: ${{ inputs.desktop_run_id }}
           BACKEND_RUN_ID_INPUT: ${{ inputs.backend_run_id }}
           LAUNCHER_RUN_ID_INPUT: ${{ inputs.launcher_run_id }}
-        run: |
-          $ErrorActionPreference = "Stop"
+          DESKTOP_REPOSITORY: ${{ inputs.desktop_repository }}
+          DESKTOP_REF: ${{ inputs.desktop_ref }}
+          BACKEND_REPOSITORY: ${{ inputs.backend_repository }}
+          LAUNCHER_REPOSITORY: ${{ inputs.launcher_repository }}
+        run: python3 sources/holder-staging/scripts/resolve-component-runs.py --platform windows
 
-          function Resolve-RunId {
-            param(
-              [string] $ProvidedRunId,
-              [string] $Repository,
-              [string] $Workflow,
-              [string] $Branch,
-              [string] $Artifact
-            )
-
-            if (![string]::IsNullOrWhiteSpace($ProvidedRunId)) {
-              if ($ProvidedRunId -notmatch '^\d+$') {
-                throw "Provided run ID for $Artifact is not numeric: $ProvidedRunId"
-              }
-              return $ProvidedRunId
-            }
-
-            $runsJson = gh api `
-              -X GET `
-              "repos/$Repository/actions/runs" `
-              -f "branch=$Branch" `
-              -f "status=success" `
-              -f "per_page=20"
-            $runs = ($runsJson | ConvertFrom-Json).workflow_runs
-
-            foreach ($run in $runs) {
-              if ([string] $run.id -notmatch '^\d+$') {
-                Write-Host "Ignoring non-numeric run ID from GitHub API: $($run.id)"
-                continue
-              }
-
-              $artifactsJson = gh api "repos/$Repository/actions/runs/$($run.id)/artifacts"
-              $artifacts = ($artifactsJson | ConvertFrom-Json).artifacts
-              if ($artifacts | Where-Object { $_.name -eq $Artifact }) {
-                return [string] $run.id
-              }
-            }
-
-            throw "No successful $Workflow run on $Repository@$Branch uploaded $Artifact"
-          }
-
-          $desktopRunId = Resolve-RunId `
-            -ProvidedRunId $env:DESKTOP_RUN_ID_INPUT `
-            -Repository "${{ inputs.desktop_repository }}" `
-            -Workflow "windows-desktop.yml" `
-            -Branch "${{ inputs.desktop_ref }}" `
-            -Artifact "holder-desktop-windows"
-          $backendRunId = Resolve-RunId `
-            -ProvidedRunId $env:BACKEND_RUN_ID_INPUT `
-            -Repository "${{ inputs.backend_repository }}" `
-            -Workflow "windows-backend.yml" `
-            -Branch "main" `
-            -Artifact "holder-daemon-windows-backend"
-          $launcherRunId = Resolve-RunId `
-            -ProvidedRunId $env:LAUNCHER_RUN_ID_INPUT `
-            -Repository "${{ inputs.launcher_repository }}" `
-            -Workflow "windows-launcher.yml" `
-            -Branch "main" `
-            -Artifact "holder-launcher-windows"
-
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "desktop_run_id=$desktopRunId"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "backend_run_id=$backendRunId"
-          Add-Content -Path $env:GITHUB_OUTPUT -Value "launcher_run_id=$launcherRunId"
-
-          Write-Host "Resolved holder-desktop Windows run: $desktopRunId"
-          Write-Host "Resolved holder-daemon Windows run: $backendRunId"
-          Write-Host "Resolved holder-launcher Windows run: $launcherRunId"
+      - name: Check out holder-desktop metadata
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.desktop_repository }}
+          ref: ${{ steps.artifact_runs.outputs.desktop_commit }}
+          token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
+          path: sources/holder-desktop
 
       - name: Download desktop artifact
         uses: actions/download-artifact@v4
@@ -166,6 +123,13 @@ jobs:
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           repository: ${{ inputs.launcher_repository }}
           run-id: ${{ steps.artifact_runs.outputs.launcher_run_id }}
+
+      - name: Verify backend core provenance
+        shell: bash
+        run: |
+          python3 sources/holder-staging/scripts/core-provenance.py verify \
+            --selection out/core-selection.json --platform windows \
+            --core-manifest downloads/backend/core-build.json --output out/core-provenance.json
 
       - name: Install Inno Setup
         shell: pwsh
@@ -218,7 +182,13 @@ jobs:
             Copy-Item $openapi -Destination $stageDir -Force
           }
 
+          Copy-Item "$backendDir\core-build.json" -Destination $stageDir -Force
+          if (Test-Path "$backendDir\vcpkg-licenses") {
+            Copy-Item "$backendDir\vcpkg-licenses" -Destination $stageDir -Recurse -Force
+          }
           $releaseDir = Join-Path $stageDir "release"
+          New-Item -ItemType Directory -Force $releaseDir | Out-Null
+          Copy-Item "out\core-provenance.json" -Destination "$releaseDir\holder-core-provenance.json" -Force
           $packagingDir = Join-Path $releaseDir "packaging\windows"
           New-Item -ItemType Directory -Force $packagingDir | Out-Null
           Copy-Item "$desktopSourceDir\packaging\windows\Holder.iss" -Destination $packagingDir -Force
@@ -227,6 +197,10 @@ jobs:
           $version = (Get-Content "$desktopSourceDir\VERSION" -Raw).Trim()
           $metadataPath = Join-Path $releaseDir "release-candidate.json"
           $metadata = [ordered]@{
+            core = (Get-Content "out/core-provenance.json" -Raw | ConvertFrom-Json)
+            desktop_commit = "${{ steps.artifact_runs.outputs.desktop_commit }}"
+            launcher_commit = "${{ steps.artifact_runs.outputs.launcher_commit }}"
+            backend_run_commit = "${{ steps.artifact_runs.outputs.backend_commit }}"
             backend_artifact = "holder-daemon-windows-backend"
             backend_repository = $env:BACKEND_REPOSITORY
             backend_run_id = $env:BACKEND_RUN_ID
@@ -244,7 +218,7 @@ jobs:
             staging_run_id = $env:STAGING_RUN_ID
             version = $version
           }
-          $metadata | ConvertTo-Json -Depth 4 | Set-Content -Encoding UTF8 $metadataPath
+          $metadata | ConvertTo-Json -Depth 8 | Set-Content -Encoding UTF8 $metadataPath
 
           $root = (Resolve-Path $stageDir).Path
           Get-ChildItem $stageDir -Recurse -File |
@@ -284,6 +258,8 @@ jobs:
 
           $stageDir = "out\artifacts\Holder-windows-staged"
           $requiredFiles = @(
+            "core-build.json",
+            "release\holder-core-provenance.json",
             "Holder.exe",
             "bin\holder-desktop.exe",
             "bin\holderd.exe",
@@ -328,6 +304,12 @@ jobs:
             throw "release-candidate.json staging_repository does not match"
           }
 
+          if ((Get-FileHash "$stageDir\core-build.json").Hash -ne (Get-FileHash "downloads\backend\core-build.json").Hash) {
+            throw "Staged core provenance differs from backend"
+          }
+          if ($metadata.core.commit -ne "${{ steps.core.outputs.commit }}") {
+            throw "Product core provenance differs from selected SDK"
+          }
           Push-Location $stageDir
           & ".\bin\holderd.exe" --help
           & ".\bin\holderd.exe" --version
@@ -400,7 +382,7 @@ jobs:
             throw "Unsigned installer exited with code $($process.ExitCode)"
           }
 
-          foreach ($file in @("Holder.exe", "bin\holder-desktop.exe", "bin\holderd.exe", "bin\holderctl.exe", "schema\schema.sql", "openapi.yaml")) {
+          foreach ($file in @("Holder.exe", "bin\holder-desktop.exe", "bin\holderd.exe", "bin\holderctl.exe", "schema\schema.sql", "openapi.yaml", "core-build.json", "release\holder-core-provenance.json")) {
             $path = Join-Path $installDir $file
             if (!(Test-Path $path)) {
               throw "Unsigned installer missing installed file: $file"
@@ -419,6 +401,7 @@ jobs:
           }
 
       - name: Build self-signed tester package
+        if: inputs.sign_test_installer
         shell: pwsh
         env:
           WINDOWS_TEST_SIGNING_PFX: ${{ secrets.WINDOWS_TEST_SIGNING_PFX }}
@@ -574,6 +557,7 @@ jobs:
           }
 
       - name: Smoke-test self-signed tester installer
+        if: inputs.sign_test_installer
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -598,7 +582,7 @@ jobs:
             throw "Self-signed test installer exited with code $($process.ExitCode)"
           }
 
-          foreach ($file in @("Holder.exe", "bin\holder-desktop.exe", "bin\holderd.exe", "bin\holderctl.exe", "schema\schema.sql", "openapi.yaml")) {
+          foreach ($file in @("Holder.exe", "bin\holder-desktop.exe", "bin\holderd.exe", "bin\holderctl.exe", "schema\schema.sql", "openapi.yaml", "core-build.json", "release\holder-core-provenance.json")) {
             $path = Join-Path $installDir $file
             if (!(Test-Path $path)) {
               throw "Self-signed installer missing installed file: $file"
@@ -625,6 +609,7 @@ jobs:
           retention-days: 7
 
       - name: Upload self-signed tester installer
+        if: inputs.sign_test_installer
         uses: actions/upload-artifact@v4
         with:
           name: Holder-windows-test-signed-installer
