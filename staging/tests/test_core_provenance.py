@@ -101,6 +101,45 @@ class ProvenanceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "full lowercase commit"):
                 tool.load_pin(manifest)
 
+    def test_shared_framework_manifest_selects_platform_and_one_core_pin(self):
+        components = {
+            "desktop": {"commit": "c" * 40, "repository": "HolderTeam/holder-desktop", "run_id": "123"},
+            "backend": {"commit": "d" * 40, "repository": "HolderTeam/holder-daemon", "run_id": "456"},
+            "launcher": {"commit": "f" * 40, "repository": "HolderTeam/holder-launcher", "run_id": "789"}}
+        document = {"version": "0.2.1-rc.1", "core": {"commit": self.sha, "build_type": "Release"},
+                    "platforms": {"linux": {key: value for key, value in components.items() if key != "launcher"},
+                                  "windows": components, "macos": components}}
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "framework.json"
+            manifest.write_text(json.dumps(document))
+            for platform in ("linux", "windows", "macos"):
+                pin = tool.load_pin(manifest, platform)
+                self.assertEqual(pin["core"]["commit"], self.sha)
+                self.assertEqual(pin["appimage_version"], "0.2.1-rc.1")
+            del document["platforms"]["macos"]
+            manifest.write_text(json.dumps(document))
+            with self.assertRaisesRegex(ValueError, "no macos selection"):
+                tool.load_pin(manifest, "macos")
+
+    def test_production_rejects_development_desktop_or_launcher(self):
+        pin = {**self.pin, "launcher": {"commit": "f" * 40}}
+        desktop = {"commit": "c" * 40, "build_type": "release"}
+        launcher = {"source": {"commit": "f" * 40}, "configuration": "Release"}
+        tool.verify_component_builds(pin, desktop, launcher)
+        with self.assertRaisesRegex(ValueError, "release desktop"):
+            tool.verify_component_builds(pin, {**desktop, "build_type": "debugoptimized"}, launcher)
+        with self.assertRaisesRegex(ValueError, "Release launcher"):
+            tool.verify_component_builds(pin, desktop, {**launcher, "configuration": "RelWithDebInfo"})
+
+    def test_launcher_source_pin_is_checked(self):
+        core = {**self.core, "platform": "windows"}
+        selection = copy.deepcopy(self.selection)
+        selection["assets"][0]["platform"] = "windows"
+        pin = {**self.pin, "launcher": {"commit": "f" * 40}}
+        with self.assertRaisesRegex(ValueError, "Launcher does not match"):
+            tool.verify(selection, core, "c" * 40, "d" * 40, pin,
+                        platform="windows", launcher_commit="e" * 40)
+
 
 if __name__ == "__main__":
     unittest.main()

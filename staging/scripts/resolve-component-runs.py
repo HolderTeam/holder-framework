@@ -33,6 +33,7 @@ def resolve(repository, workflow, branch, artifact, provided="", request=api):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=("windows", "macos"), required=True)
+    parser.add_argument("--build-type", choices=("Release", "RelWithDebInfo"), default="RelWithDebInfo")
     args = parser.parse_args()
     suffix = args.platform
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
@@ -42,8 +43,12 @@ def main():
             if component == "backend":
                 workflow = "daemon-integration.yml" if repository == "HolderTeam/holder-core" else "ci.yml"
                 artifact = f"holder-daemon-{suffix}-backend"
+                if args.build_type == "Release":
+                    artifact += "-release"
             else:
                 artifact = f"holder-{component}-{suffix}"
+                if args.build_type == "Release":
+                    artifact += "-release"
             run_id, sha = resolve(repository, workflow,
                                   os.environ.get(component.upper() + "_REF", "main"), artifact,
                                   os.environ.get(component.upper() + "_RUN_ID_INPUT", ""))

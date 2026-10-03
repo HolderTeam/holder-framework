@@ -1,6 +1,13 @@
 # holder-staging
 Builds and stages Holder release candidates
 
+For a whole-framework RC or production release, use one
+[framework release manifest](docs/framework-release-manifest.md) across Linux,
+Windows and macOS. It pins one core SDK revision/configuration, product version
+and each platform's component runs and source commits. Release manifests require
+Release backend/core and launcher artifacts and release Meson desktop artifacts.
+Normal development staging continues to follow latest-green.
+
 ## Windows
 
 The Windows staged package workflow assembles the three Windows build outputs into a release-candidate layout:
@@ -87,8 +94,9 @@ version and `core_ref` overrides at their defaults. For example:
 ```
 
 Every component commit and the core build configuration are checked against
-the extracted artifacts. Current daemon CI artifacts use `RelWithDebInfo`;
-request `Release` only with an artifact actually built against the Release SDK.
+the extracted artifacts. Development daemon artifacts use `RelWithDebInfo`;
+production artifacts use daemon's `core_build_type=Release` workflow input and
+distinct `-release` artifact names.
 Component Actions artifacts expire, so stage the pinned candidate while they
 are available. Signing and promotion use that staged AppImage afterwards.
 

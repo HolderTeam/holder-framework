@@ -33,6 +33,11 @@ on:
         required: true
         type: string
         default: HolderTeam/holder-core
+      release_manifest:
+        description: Checked-in framework manifest pinning core and this platform's component runs
+        required: false
+        default: ""
+        type: string
       core_ref:
         description: Core SDK selection; latest-green, tag or full SHA
         required: false
@@ -56,6 +61,8 @@ permissions:
 jobs:
   stage:
     runs-on: windows-latest
+    env:
+      RELEASE_MANIFEST: ${{ inputs.release_manifest }}
     environment: ${{ inputs.sign_test_installer && 'windows-staging' || '' }}
 
     steps:
@@ -68,31 +75,51 @@ jobs:
         shell: bash
         run: python3 -m unittest discover -s sources/holder-staging/tests -v
 
+      - name: Select development inputs or framework release pins
+        id: pins
+        shell: bash
+        env:
+          RELEASE_MANIFEST: ${{ inputs.release_manifest }}
+          CORE_REF_INPUT: ${{ inputs.core_ref }}
+          DESKTOP_RUN_ID_INPUT: ${{ inputs.desktop_run_id }}
+          BACKEND_RUN_ID_INPUT: ${{ inputs.backend_run_id }}
+          LAUNCHER_RUN_ID_INPUT: ${{ inputs.launcher_run_id }}
+          DESKTOP_REPOSITORY_INPUT: ${{ inputs.desktop_repository }}
+          BACKEND_REPOSITORY_INPUT: ${{ inputs.backend_repository }}
+          LAUNCHER_REPOSITORY_INPUT: ${{ inputs.launcher_repository }}
+        run: |
+          options=()
+          if [[ -n "$RELEASE_MANIFEST" ]]; then
+            options=(--release-manifest "sources/holder-staging/$RELEASE_MANIFEST")
+          fi
+          python3 sources/holder-staging/scripts/core-provenance.py prepare \
+            --platform windows "${options[@]}"
+
       - name: Resolve core SDK once
         id: core
         uses: HolderTeam/holder-core/.github/actions/core-sdk@main
         with:
           command: resolve
-          core-ref: ${{ inputs.core_ref }}
+          core-ref: ${{ steps.pins.outputs.core_ref }}
 
       - name: Resolve artifact run IDs
         id: artifact_runs
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          DESKTOP_RUN_ID_INPUT: ${{ inputs.desktop_run_id }}
-          BACKEND_RUN_ID_INPUT: ${{ inputs.backend_run_id }}
-          LAUNCHER_RUN_ID_INPUT: ${{ inputs.launcher_run_id }}
-          DESKTOP_REPOSITORY: ${{ inputs.desktop_repository }}
+          DESKTOP_RUN_ID_INPUT: ${{ steps.pins.outputs.desktop_run_id }}
+          BACKEND_RUN_ID_INPUT: ${{ steps.pins.outputs.backend_run_id }}
+          LAUNCHER_RUN_ID_INPUT: ${{ steps.pins.outputs.launcher_run_id }}
+          DESKTOP_REPOSITORY: ${{ steps.pins.outputs.desktop_repository }}
           DESKTOP_REF: ${{ inputs.desktop_ref }}
-          BACKEND_REPOSITORY: ${{ inputs.backend_repository }}
-          LAUNCHER_REPOSITORY: ${{ inputs.launcher_repository }}
-        run: python3 sources/holder-staging/scripts/resolve-component-runs.py --platform windows
+          BACKEND_REPOSITORY: ${{ steps.pins.outputs.backend_repository }}
+          LAUNCHER_REPOSITORY: ${{ steps.pins.outputs.launcher_repository }}
+        run: python3 sources/holder-staging/scripts/resolve-component-runs.py --platform windows --build-type "${{ steps.pins.outputs.build_type }}"
 
       - name: Check out holder-desktop metadata
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.desktop_repository }}
+          repository: ${{ steps.pins.outputs.desktop_repository }}
           ref: ${{ steps.artifact_runs.outputs.desktop_commit }}
           token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           path: sources/holder-desktop
@@ -100,36 +127,48 @@ jobs:
       - name: Download desktop artifact
         uses: actions/download-artifact@v4
         with:
-          name: holder-desktop-windows
+          name: holder-desktop-windows${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
           path: downloads/desktop
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          repository: ${{ inputs.desktop_repository }}
+          repository: ${{ steps.pins.outputs.desktop_repository }}
           run-id: ${{ steps.artifact_runs.outputs.desktop_run_id }}
 
       - name: Download backend artifact
         uses: actions/download-artifact@v4
         with:
-          name: holder-daemon-windows-backend
+          name: holder-daemon-windows-backend${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
           path: downloads/backend
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          repository: ${{ inputs.backend_repository }}
+          repository: ${{ steps.pins.outputs.backend_repository }}
           run-id: ${{ steps.artifact_runs.outputs.backend_run_id }}
 
       - name: Download launcher artifact
         uses: actions/download-artifact@v4
         with:
-          name: holder-launcher-windows
+          name: holder-launcher-windows${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
           path: downloads/launcher
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          repository: ${{ inputs.launcher_repository }}
+          repository: ${{ steps.pins.outputs.launcher_repository }}
           run-id: ${{ steps.artifact_runs.outputs.launcher_run_id }}
 
-      - name: Verify backend core provenance
+      - name: Verify backend core and release pins
         shell: bash
+        env:
+          RELEASE_MANIFEST: ${{ inputs.release_manifest }}
+          DESKTOP_COMMIT: ${{ steps.artifact_runs.outputs.desktop_commit }}
+          LAUNCHER_COMMIT: ${{ steps.artifact_runs.outputs.launcher_commit }}
+          BUILD_TYPE: ${{ steps.pins.outputs.build_type }}
         run: |
+          options=()
+          if [[ -n "$RELEASE_MANIFEST" ]]; then
+            options=(--release-manifest "sources/holder-staging/$RELEASE_MANIFEST")
+          fi
           python3 sources/holder-staging/scripts/core-provenance.py verify \
             --selection out/core-selection.json --platform windows \
-            --core-manifest downloads/backend/core-build.json --output out/core-provenance.json
+            --backend-root downloads/backend --desktop-root downloads/desktop \
+            --launcher-root downloads/launcher --desktop-commit "$DESKTOP_COMMIT" \
+            --launcher-commit "$LAUNCHER_COMMIT" --build-type "$BUILD_TYPE" \
+            --output out/core-provenance.json "${options[@]}"
 
       - name: Install Inno Setup
         shell: pwsh
@@ -138,13 +177,15 @@ jobs:
       - name: Assemble unsigned staged package
         shell: pwsh
         env:
-          BACKEND_REPOSITORY: ${{ inputs.backend_repository }}
+          BACKEND_REPOSITORY: ${{ steps.pins.outputs.backend_repository }}
           BACKEND_RUN_ID: ${{ steps.artifact_runs.outputs.backend_run_id }}
-          DESKTOP_REPOSITORY: ${{ inputs.desktop_repository }}
+          DESKTOP_REPOSITORY: ${{ steps.pins.outputs.desktop_repository }}
           DESKTOP_REF: ${{ inputs.desktop_ref }}
           DESKTOP_RUN_ID: ${{ steps.artifact_runs.outputs.desktop_run_id }}
-          LAUNCHER_REPOSITORY: ${{ inputs.launcher_repository }}
+          LAUNCHER_REPOSITORY: ${{ steps.pins.outputs.launcher_repository }}
           LAUNCHER_RUN_ID: ${{ steps.artifact_runs.outputs.launcher_run_id }}
+          PRODUCT_VERSION: ${{ steps.pins.outputs.appimage_version }}
+          RELEASE_MANIFEST: ${{ inputs.release_manifest }}
           STAGING_REPOSITORY: ${{ github.repository }}
           STAGING_RUN_ID: ${{ github.run_id }}
         run: |
@@ -189,27 +230,32 @@ jobs:
           $releaseDir = Join-Path $stageDir "release"
           New-Item -ItemType Directory -Force $releaseDir | Out-Null
           Copy-Item "out\core-provenance.json" -Destination "$releaseDir\holder-core-provenance.json" -Force
+          Copy-Item "$launcherDir/build-info.json" -Destination "$releaseDir/holder-launcher-build.json" -Force
           $packagingDir = Join-Path $releaseDir "packaging\windows"
           New-Item -ItemType Directory -Force $packagingDir | Out-Null
           Copy-Item "$desktopSourceDir\packaging\windows\Holder.iss" -Destination $packagingDir -Force
           Copy-Item "$desktopSourceDir\packaging\windows\Holder.ico" -Destination $packagingDir -Force
 
           $version = (Get-Content "$desktopSourceDir\VERSION" -Raw).Trim()
+          if ($env:PRODUCT_VERSION) { $version = $env:PRODUCT_VERSION }
+          if ($env:RELEASE_MANIFEST) {
+            Copy-Item "sources/holder-staging/$env:RELEASE_MANIFEST" -Destination "$releaseDir/holder-framework-release.json"
+          }
           $metadataPath = Join-Path $releaseDir "release-candidate.json"
           $metadata = [ordered]@{
             core = (Get-Content "out/core-provenance.json" -Raw | ConvertFrom-Json)
             desktop_commit = "${{ steps.artifact_runs.outputs.desktop_commit }}"
             launcher_commit = "${{ steps.artifact_runs.outputs.launcher_commit }}"
             backend_run_commit = "${{ steps.artifact_runs.outputs.backend_commit }}"
-            backend_artifact = "holder-daemon-windows-backend"
+            backend_artifact = "holder-daemon-windows-backend${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}"
             backend_repository = $env:BACKEND_REPOSITORY
             backend_run_id = $env:BACKEND_RUN_ID
             created_utc = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss'Z'")
-            desktop_artifact = "holder-desktop-windows"
+            desktop_artifact = "holder-desktop-windows${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}"
             desktop_ref = $env:DESKTOP_REF
             desktop_repository = $env:DESKTOP_REPOSITORY
             desktop_run_id = $env:DESKTOP_RUN_ID
-            launcher_artifact = "holder-launcher-windows"
+            launcher_artifact = "holder-launcher-windows${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}"
             launcher_repository = $env:LAUNCHER_REPOSITORY
             launcher_run_id = $env:LAUNCHER_RUN_ID
             platform = "windows"
@@ -386,6 +432,14 @@ jobs:
             $path = Join-Path $installDir $file
             if (!(Test-Path $path)) {
               throw "Unsigned installer missing installed file: $file"
+            }
+          }
+
+          if ($env:RELEASE_MANIFEST) {
+            $expected = "sources/holder-staging/$env:RELEASE_MANIFEST"
+            $installed = Join-Path $installDir "release/holder-framework-release.json"
+            if ((Get-FileHash $expected).Hash -ne (Get-FileHash $installed).Hash) {
+              throw "Installed framework release manifest differs from selected pins"
             }
           }
 
@@ -586,6 +640,14 @@ jobs:
             $path = Join-Path $installDir $file
             if (!(Test-Path $path)) {
               throw "Self-signed installer missing installed file: $file"
+            }
+          }
+
+          if ($env:RELEASE_MANIFEST) {
+            $expected = "sources/holder-staging/$env:RELEASE_MANIFEST"
+            $installed = Join-Path $installDir "release/holder-framework-release.json"
+            if ((Get-FileHash $expected).Hash -ne (Get-FileHash $installed).Hash) {
+              throw "Installed framework release manifest differs from selected pins"
             }
           }
 

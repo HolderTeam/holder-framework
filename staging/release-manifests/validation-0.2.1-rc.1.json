@@ -1,0 +1,55 @@
+{
+  "version": "0.2.1-rc.1",
+  "core": {
+    "commit": "dd3736b6cb211c592eea2baec55244b4bc67c196",
+    "build_type": "Release"
+  },
+  "platforms": {
+    "linux": {
+      "desktop": {
+        "repository": "HolderTeam/holder-desktop",
+        "run_id": "37114952111",
+        "commit": "20dc69e5d15bf5277595998f81df15efbeaf41fb"
+      },
+      "backend": {
+        "repository": "HolderTeam/holder-daemon",
+        "run_id": "37114532747",
+        "commit": "0399c919259aa98e9211258873d171f798ec5490"
+      }
+    },
+    "windows": {
+      "desktop": {
+        "repository": "HolderTeam/holder-desktop",
+        "run_id": "37114952314",
+        "commit": "20dc69e5d15bf5277595998f81df15efbeaf41fb"
+      },
+      "backend": {
+        "repository": "HolderTeam/holder-daemon",
+        "run_id": "37114532747",
+        "commit": "0399c919259aa98e9211258873d171f798ec5490"
+      },
+      "launcher": {
+        "repository": "HolderTeam/holder-launcher",
+        "run_id": "37114952004",
+        "commit": "6486ab9e4447281a1c5c6911b887471bf88f3e96"
+      }
+    },
+    "macos": {
+      "desktop": {
+        "repository": "HolderTeam/holder-desktop",
+        "run_id": "37114952184",
+        "commit": "20dc69e5d15bf5277595998f81df15efbeaf41fb"
+      },
+      "backend": {
+        "repository": "HolderTeam/holder-daemon",
+        "run_id": "37114532747",
+        "commit": "0399c919259aa98e9211258873d171f798ec5490"
+      },
+      "launcher": {
+        "repository": "HolderTeam/holder-launcher",
+        "run_id": "37114951960",
+        "commit": "6486ab9e4447281a1c5c6911b887471bf88f3e96"
+      }
+    }
+  }
+}

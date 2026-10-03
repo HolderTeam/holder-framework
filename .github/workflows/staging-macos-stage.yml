@@ -33,6 +33,11 @@ on:
         required: true
         type: string
         default: HolderTeam/holder-core
+      release_manifest:
+        description: Checked-in framework manifest pinning core and this platform's component runs
+        required: false
+        default: ""
+        type: string
       core_ref:
         description: Core SDK selection; latest-green, tag or full SHA
         required: false
@@ -62,31 +67,51 @@ jobs:
         shell: bash
         run: python3 -m unittest discover -s sources/holder-staging/tests -v
 
+      - name: Select development inputs or framework release pins
+        id: pins
+        shell: bash
+        env:
+          RELEASE_MANIFEST: ${{ inputs.release_manifest }}
+          CORE_REF_INPUT: ${{ inputs.core_ref }}
+          DESKTOP_RUN_ID_INPUT: ${{ inputs.desktop_run_id }}
+          BACKEND_RUN_ID_INPUT: ${{ inputs.backend_run_id }}
+          LAUNCHER_RUN_ID_INPUT: ${{ inputs.launcher_run_id }}
+          DESKTOP_REPOSITORY_INPUT: ${{ inputs.desktop_repository }}
+          BACKEND_REPOSITORY_INPUT: ${{ inputs.backend_repository }}
+          LAUNCHER_REPOSITORY_INPUT: ${{ inputs.launcher_repository }}
+        run: |
+          options=()
+          if [[ -n "$RELEASE_MANIFEST" ]]; then
+            options=(--release-manifest "sources/holder-staging/$RELEASE_MANIFEST")
+          fi
+          python3 sources/holder-staging/scripts/core-provenance.py prepare \
+            --platform macos "${options[@]}"
+
       - name: Resolve core SDK once
         id: core
         uses: HolderTeam/holder-core/.github/actions/core-sdk@main
         with:
           command: resolve
-          core-ref: ${{ inputs.core_ref }}
+          core-ref: ${{ steps.pins.outputs.core_ref }}
 
       - name: Resolve artifact run IDs
         id: artifact_runs
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          DESKTOP_RUN_ID_INPUT: ${{ inputs.desktop_run_id }}
-          BACKEND_RUN_ID_INPUT: ${{ inputs.backend_run_id }}
-          LAUNCHER_RUN_ID_INPUT: ${{ inputs.launcher_run_id }}
-          DESKTOP_REPOSITORY: ${{ inputs.desktop_repository }}
+          DESKTOP_RUN_ID_INPUT: ${{ steps.pins.outputs.desktop_run_id }}
+          BACKEND_RUN_ID_INPUT: ${{ steps.pins.outputs.backend_run_id }}
+          LAUNCHER_RUN_ID_INPUT: ${{ steps.pins.outputs.launcher_run_id }}
+          DESKTOP_REPOSITORY: ${{ steps.pins.outputs.desktop_repository }}
           DESKTOP_REF: ${{ inputs.desktop_ref }}
-          BACKEND_REPOSITORY: ${{ inputs.backend_repository }}
-          LAUNCHER_REPOSITORY: ${{ inputs.launcher_repository }}
-        run: python3 sources/holder-staging/scripts/resolve-component-runs.py --platform macos
+          BACKEND_REPOSITORY: ${{ steps.pins.outputs.backend_repository }}
+          LAUNCHER_REPOSITORY: ${{ steps.pins.outputs.launcher_repository }}
+        run: python3 sources/holder-staging/scripts/resolve-component-runs.py --platform macos --build-type "${{ steps.pins.outputs.build_type }}"
 
       - name: Check out holder-desktop metadata
         uses: actions/checkout@v4
         with:
-          repository: ${{ inputs.desktop_repository }}
+          repository: ${{ steps.pins.outputs.desktop_repository }}
           ref: ${{ steps.artifact_runs.outputs.desktop_commit }}
           token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           path: sources/holder-desktop
@@ -94,36 +119,48 @@ jobs:
       - name: Download desktop artifact
         uses: actions/download-artifact@v4
         with:
-          name: holder-desktop-macos
+          name: holder-desktop-macos${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
           path: downloads/desktop
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          repository: ${{ inputs.desktop_repository }}
+          repository: ${{ steps.pins.outputs.desktop_repository }}
           run-id: ${{ steps.artifact_runs.outputs.desktop_run_id }}
 
       - name: Download backend artifact
         uses: actions/download-artifact@v4
         with:
-          name: holder-daemon-macos-backend
+          name: holder-daemon-macos-backend${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
           path: downloads/backend
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          repository: ${{ inputs.backend_repository }}
+          repository: ${{ steps.pins.outputs.backend_repository }}
           run-id: ${{ steps.artifact_runs.outputs.backend_run_id }}
 
       - name: Download launcher artifact
         uses: actions/download-artifact@v4
         with:
-          name: holder-launcher-macos
+          name: holder-launcher-macos${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
           path: downloads/launcher
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          repository: ${{ inputs.launcher_repository }}
+          repository: ${{ steps.pins.outputs.launcher_repository }}
           run-id: ${{ steps.artifact_runs.outputs.launcher_run_id }}
 
-      - name: Verify backend core provenance
+      - name: Verify backend core and release pins
         shell: bash
+        env:
+          RELEASE_MANIFEST: ${{ inputs.release_manifest }}
+          DESKTOP_COMMIT: ${{ steps.artifact_runs.outputs.desktop_commit }}
+          LAUNCHER_COMMIT: ${{ steps.artifact_runs.outputs.launcher_commit }}
+          BUILD_TYPE: ${{ steps.pins.outputs.build_type }}
         run: |
+          options=()
+          if [[ -n "$RELEASE_MANIFEST" ]]; then
+            options=(--release-manifest "sources/holder-staging/$RELEASE_MANIFEST")
+          fi
           python3 sources/holder-staging/scripts/core-provenance.py verify \
             --selection out/core-selection.json --platform macos \
-            --core-manifest downloads/backend/core-build.json --output out/core-provenance.json
+            --backend-root downloads/backend --desktop-root downloads/desktop \
+            --launcher-root downloads/launcher --desktop-commit "$DESKTOP_COMMIT" \
+            --launcher-commit "$LAUNCHER_COMMIT" --build-type "$BUILD_TYPE" \
+            --output out/core-provenance.json "${options[@]}"
 
       - name: Install Homebrew runtime tools
         run: |
@@ -153,12 +190,15 @@ jobs:
             openssl@3
 
       - name: Assemble Holder.app
+        env:
+          PRODUCT_VERSION: ${{ steps.pins.outputs.appimage_version }}
+          RELEASE_MANIFEST: ${{ inputs.release_manifest }}
         run: |
           set -euo pipefail
 
           desktop_source_dir="sources/holder-desktop"
           staging_source_dir="sources/holder-staging"
-          version="$(tr -d '[:space:]' < "${desktop_source_dir}/VERSION")"
+          version="${PRODUCT_VERSION:-$(tr -d '[:space:]' < "${desktop_source_dir}/VERSION")}"
           homebrew_prefix="$(brew --prefix)"
           homebrew_enchant_prefix="$(brew --prefix enchant)"
           homebrew_gdk_pixbuf_prefix="$(brew --prefix gdk-pixbuf)"
@@ -217,6 +257,13 @@ jobs:
           cp downloads/backend/openapi.yaml "${resources_dir}/openapi.yaml"
           cp downloads/backend/core-build.json "${resources_dir}/core-build.json"
           cp out/core-provenance.json "${metadata_dir}/holder-core-provenance.json"
+          if [[ -f downloads/desktop/release/holder-desktop-build.json ]]; then
+            cp downloads/desktop/release/holder-desktop-build.json "${metadata_dir}/"
+          fi
+          cp downloads/launcher/build-info.json "${metadata_dir}/holder-launcher-build.json"
+          if [[ -n "$RELEASE_MANIFEST" ]]; then
+            cp "sources/holder-staging/$RELEASE_MANIFEST" "${metadata_dir}/holder-framework-release.json"
+          fi
 
           copy_tree_dereference_if_exists() {
             local source_dir="$1"
@@ -503,13 +550,13 @@ jobs:
 
           HOLDER_VERSION="${version}" \
           STAGING_SHA="${staging_sha}" \
-          DESKTOP_REPOSITORY="${{ inputs.desktop_repository }}" \
+          DESKTOP_REPOSITORY="${{ steps.pins.outputs.desktop_repository }}" \
           DESKTOP_REF="${{ inputs.desktop_ref }}" \
           DESKTOP_SHA="${desktop_sha}" \
           DESKTOP_RUN_ID="${{ steps.artifact_runs.outputs.desktop_run_id }}" \
-          BACKEND_REPOSITORY="${{ inputs.backend_repository }}" \
+          BACKEND_REPOSITORY="${{ steps.pins.outputs.backend_repository }}" \
           BACKEND_RUN_ID="${{ steps.artifact_runs.outputs.backend_run_id }}" \
-          LAUNCHER_REPOSITORY="${{ inputs.launcher_repository }}" \
+          LAUNCHER_REPOSITORY="${{ steps.pins.outputs.launcher_repository }}" \
           LAUNCHER_RUN_ID="${{ steps.artifact_runs.outputs.launcher_run_id }}" \
           METADATA_PATH="${metadata_dir}/release-candidate.json" \
           python3 - <<'PY'
@@ -530,13 +577,13 @@ jobs:
               "desktop_ref": os.environ["DESKTOP_REF"],
               "desktop_sha": os.environ["DESKTOP_SHA"],
               "desktop_run_id": os.environ["DESKTOP_RUN_ID"],
-              "desktop_artifact": "holder-desktop-macos",
+              "desktop_artifact": "holder-desktop-macos${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}",
               "backend_repository": os.environ["BACKEND_REPOSITORY"],
               "backend_run_id": os.environ["BACKEND_RUN_ID"],
-              "backend_artifact": "holder-daemon-macos-backend",
+              "backend_artifact": "holder-daemon-macos-backend${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}",
               "launcher_repository": os.environ["LAUNCHER_REPOSITORY"],
               "launcher_run_id": os.environ["LAUNCHER_RUN_ID"],
-              "launcher_artifact": "holder-launcher-macos",
+              "launcher_artifact": "holder-launcher-macos${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}",
           }
 
           with open(os.environ["METADATA_PATH"], "w", encoding="utf-8") as f:
@@ -576,6 +623,8 @@ jobs:
           find "${app_dir}" -maxdepth 5 -type f | sort
 
       - name: Smoke-test Holder.app
+        env:
+          RELEASE_MANIFEST: ${{ inputs.release_manifest }}
         run: |
           set -euo pipefail
 
@@ -618,6 +667,9 @@ jobs:
           check_file "${resources_dir}/openapi.yaml"
           cmp downloads/backend/core-build.json "${resources_dir}/core-build.json"
           cmp out/core-provenance.json "${resources_dir}/release/holder-core-provenance.json"
+          if [[ -n "$RELEASE_MANIFEST" ]]; then
+            cmp "sources/holder-staging/$RELEASE_MANIFEST" "${resources_dir}/release/holder-framework-release.json"
+          fi
           check_file "${resources_dir}/share/glib-2.0/schemas/gschemas.compiled"
           check_file "${resources_dir}/share/gtksourceview-5/language-specs/language2.rng"
           check_file "${resources_dir}/share/icons/Adwaita/symbolic/actions/view-refresh-symbolic.svg"
