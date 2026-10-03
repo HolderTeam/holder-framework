@@ -100,6 +100,7 @@ jobs:
           DESKTOP_REF: ${{ inputs.desktop_ref }}
           BACKEND_REPOSITORY: ${{ steps.pins.outputs.backend_repository }}
           BACKEND_REF: ${{ inputs.backend_ref }}
+          BUILD_TYPE: ${{ steps.pins.outputs.build_type }}
         run: |
           set -euo pipefail
 
@@ -161,12 +162,16 @@ jobs:
             return 1
           }
 
+          desktop_artifact=holder-desktop-linux-x86_64
+          if [[ "$BUILD_TYPE" == Release ]]; then desktop_artifact+=-release; fi
           desktop_run_id="$(resolve_run_id \
             "${DESKTOP_RUN_ID_INPUT}" \
             "${DESKTOP_REPOSITORY}" \
             "linux-desktop.yml" \
             "${DESKTOP_REF}" \
-            "holder-desktop-linux-x86_64")"
+            "$desktop_artifact")"
+          backend_artifact=holder-daemon-linux-x86_64
+          if [[ "$BUILD_TYPE" == Release ]]; then backend_artifact+=-release; fi
           backend_workflow=ci.yml
           if [[ "$BACKEND_REPOSITORY" == HolderTeam/holder-core ]]; then
             backend_workflow=daemon-integration.yml
@@ -176,7 +181,7 @@ jobs:
             "${BACKEND_REPOSITORY}" \
             "$backend_workflow" \
             "${BACKEND_REF}" \
-            "holder-daemon-linux-x86_64")"
+            "$backend_artifact")"
 
           {
             echo "desktop_run_id=${desktop_run_id}"
@@ -195,7 +200,7 @@ jobs:
       - name: Download desktop artifact
         uses: actions/download-artifact@v4
         with:
-          name: holder-desktop-linux-x86_64
+          name: holder-desktop-linux-x86_64${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
           path: downloads/desktop
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           repository: ${{ steps.pins.outputs.desktop_repository }}
@@ -204,7 +209,7 @@ jobs:
       - name: Download backend artifact
         uses: actions/download-artifact@v4
         with:
-          name: holder-daemon-linux-x86_64
+          name: holder-daemon-linux-x86_64${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
           path: downloads/backend
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           repository: ${{ steps.pins.outputs.backend_repository }}
@@ -298,6 +303,7 @@ jobs:
           python3 sources/holder-staging/scripts/core-provenance.py verify \
             --selection out/core-selection.json \
             --desktop-root work/desktop-root --backend-root work/backend-root \
+            --build-type "${{ steps.pins.outputs.build_type }}" \
             --output out/core-provenance.json "${options[@]}"
           echo "Core SDK: \`${{ steps.core.outputs.commit }}\`" >> "$GITHUB_STEP_SUMMARY"
 
@@ -548,6 +554,7 @@ jobs:
 
       - name: Smoke-test final AppImage
         env:
+          RELEASE_MANIFEST: ${{ inputs.release_manifest }}
           APPIMAGE_VERSION: ${{ steps.compatibility.outputs.appimage_version }}
         run: |
           set -euo pipefail
@@ -564,6 +571,10 @@ jobs:
           (cd "$extract_dir" && "$appimage" --appimage-extract >/dev/null)
           cmp out/core-provenance.json \
             "$extract_dir/squashfs-root/usr/share/holder/release/holder-core-provenance.json"
+          if [[ -n "$RELEASE_MANIFEST" ]]; then
+            cmp "sources/holder-staging/$RELEASE_MANIFEST" \
+              "$extract_dir/squashfs-root/usr/share/holder/release/holder-framework-release.json"
+          fi
 
       - name: Upload staged Linux package
         uses: actions/upload-artifact@v4
