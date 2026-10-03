@@ -9,7 +9,7 @@ on:
         default: ""
         type: string
       backend_run_id:
-        description: Optional holder-daemon Linux run ID; blank uses the latest successful main artifact
+        description: Optional run containing a daemon Linux artifact; blank uses the latest successful core integration
         required: false
         default: ""
         type: string
@@ -24,14 +24,24 @@ on:
         default: main
         type: string
       backend_repository:
-        description: Repository containing the Linux backend artifact
+        description: Repository containing the daemon artifact (core downstream integration by default)
         required: false
-        default: HolderTeam/holder-daemon
+        default: HolderTeam/holder-core
         type: string
       backend_ref:
         description: Branch used when automatically resolving the backend artifact
         required: false
         default: main
+        type: string
+      core_ref:
+        description: Core SDK selection for development; latest-green, tag or full SHA
+        required: false
+        default: latest-green
+        type: string
+      release_manifest:
+        description: Optional checked-in JSON manifest pinning core and component runs for an RC/release
+        required: false
+        default: ""
         type: string
       appimage_version:
         description: Optional product version; blank uses holder-staging/VERSION
@@ -53,15 +63,42 @@ jobs:
         with:
           path: sources/holder-staging
 
+      - name: Test core provenance validation
+        run: python3 -m unittest discover -s sources/holder-staging/tests -v
+
+      - name: Select development inputs or release pins
+        id: pins
+        env:
+          RELEASE_MANIFEST: ${{ inputs.release_manifest }}
+          CORE_REF_INPUT: ${{ inputs.core_ref }}
+          DESKTOP_RUN_ID_INPUT: ${{ inputs.desktop_run_id }}
+          BACKEND_RUN_ID_INPUT: ${{ inputs.backend_run_id }}
+          APPIMAGE_VERSION_INPUT: ${{ inputs.appimage_version }}
+          DESKTOP_REPOSITORY_INPUT: ${{ inputs.desktop_repository }}
+          BACKEND_REPOSITORY_INPUT: ${{ inputs.backend_repository }}
+        run: |
+          options=()
+          if [[ -n "$RELEASE_MANIFEST" ]]; then
+            options=(--release-manifest "sources/holder-staging/$RELEASE_MANIFEST")
+          fi
+          python3 sources/holder-staging/scripts/linux-appimage/core-provenance.py prepare "${options[@]}"
+
+      - name: Resolve core SDK once
+        id: core
+        uses: HolderTeam/holder-core/.github/actions/core-sdk@main
+        with:
+          command: resolve
+          core-ref: ${{ steps.pins.outputs.core_ref }}
+
       - name: Resolve component artifact runs
         id: artifact_runs
         env:
           GH_TOKEN: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          DESKTOP_RUN_ID_INPUT: ${{ inputs.desktop_run_id }}
-          BACKEND_RUN_ID_INPUT: ${{ inputs.backend_run_id }}
-          DESKTOP_REPOSITORY: ${{ inputs.desktop_repository }}
+          DESKTOP_RUN_ID_INPUT: ${{ steps.pins.outputs.desktop_run_id }}
+          BACKEND_RUN_ID_INPUT: ${{ steps.pins.outputs.backend_run_id }}
+          DESKTOP_REPOSITORY: ${{ steps.pins.outputs.desktop_repository }}
           DESKTOP_REF: ${{ inputs.desktop_ref }}
-          BACKEND_REPOSITORY: ${{ inputs.backend_repository }}
+          BACKEND_REPOSITORY: ${{ steps.pins.outputs.backend_repository }}
           BACKEND_REF: ${{ inputs.backend_ref }}
         run: |
           set -euo pipefail
@@ -130,10 +167,14 @@ jobs:
             "linux-desktop.yml" \
             "${DESKTOP_REF}" \
             "holder-desktop-linux-x86_64")"
+          backend_workflow=ci.yml
+          if [[ "$BACKEND_REPOSITORY" == HolderTeam/holder-core ]]; then
+            backend_workflow=daemon-integration.yml
+          fi
           backend_run_id="$(resolve_run_id \
             "${BACKEND_RUN_ID_INPUT}" \
             "${BACKEND_REPOSITORY}" \
-            "linux-backend.yml" \
+            "$backend_workflow" \
             "${BACKEND_REF}" \
             "holder-daemon-linux-x86_64")"
 
@@ -157,7 +198,7 @@ jobs:
           name: holder-desktop-linux-x86_64
           path: downloads/desktop
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          repository: ${{ inputs.desktop_repository }}
+          repository: ${{ steps.pins.outputs.desktop_repository }}
           run-id: ${{ steps.artifact_runs.outputs.desktop_run_id }}
 
       - name: Download backend artifact
@@ -166,7 +207,7 @@ jobs:
           name: holder-daemon-linux-x86_64
           path: downloads/backend
           github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          repository: ${{ inputs.backend_repository }}
+          repository: ${{ steps.pins.outputs.backend_repository }}
           run-id: ${{ steps.artifact_runs.outputs.backend_run_id }}
 
       - name: Install AppImage assembly dependencies
@@ -246,10 +287,24 @@ jobs:
           verify_and_extract downloads/desktop work/desktop-root
           verify_and_extract downloads/backend work/backend-root
 
+      - name: Verify backend core and release pins
+        env:
+          RELEASE_MANIFEST: ${{ inputs.release_manifest }}
+        run: |
+          options=()
+          if [[ -n "$RELEASE_MANIFEST" ]]; then
+            options=(--release-manifest "sources/holder-staging/$RELEASE_MANIFEST")
+          fi
+          python3 sources/holder-staging/scripts/linux-appimage/core-provenance.py verify \
+            --selection out/core-selection.json \
+            --desktop-root work/desktop-root --backend-root work/backend-root \
+            --output out/core-provenance.json "${options[@]}"
+          echo "Core SDK: \`${{ steps.core.outputs.commit }}\`" >> "$GITHUB_STEP_SUMMARY"
+
       - name: Validate component compatibility
         id: compatibility
         env:
-          APPIMAGE_VERSION_INPUT: ${{ inputs.appimage_version }}
+          APPIMAGE_VERSION_INPUT: ${{ steps.pins.outputs.appimage_version }}
         run: |
           set -euo pipefail
 
@@ -318,10 +373,11 @@ jobs:
       - name: Assemble AppDir and bundle runtime
         env:
           APPIMAGE_VERSION: ${{ steps.compatibility.outputs.appimage_version }}
-          BACKEND_REPOSITORY: ${{ inputs.backend_repository }}
+          BACKEND_REPOSITORY: ${{ steps.pins.outputs.backend_repository }}
           BACKEND_RUN_ID: ${{ steps.artifact_runs.outputs.backend_run_id }}
-          DESKTOP_REPOSITORY: ${{ inputs.desktop_repository }}
+          DESKTOP_REPOSITORY: ${{ steps.pins.outputs.desktop_repository }}
           DESKTOP_RUN_ID: ${{ steps.artifact_runs.outputs.desktop_run_id }}
+          RELEASE_MANIFEST: ${{ inputs.release_manifest }}
         run: |
           set -euo pipefail
 
@@ -334,6 +390,7 @@ jobs:
             "${APPIMAGE_VERSION}"
 
           jq -n \
+            --slurpfile core out/core-provenance.json \
             --arg appimage_version "${APPIMAGE_VERSION}" \
             --arg desktop_repository "${DESKTOP_REPOSITORY}" \
             --arg desktop_run_id "${DESKTOP_RUN_ID}" \
@@ -345,6 +402,7 @@ jobs:
             --arg backend_commit "$(cat work/backend-root/release/holder-daemon-commit.txt)" \
             --arg daemon_api "${{ steps.compatibility.outputs.backend_api_version }}" \
             '{
+              core: $core[0],
               appimage_version: $appimage_version,
               desktop: {
                 repository: $desktop_repository,
@@ -360,6 +418,12 @@ jobs:
                 api_version: $daemon_api
               }
             }' > "${appdir}/usr/share/holder/release/holder-appimage-provenance.json"
+
+          cp out/core-provenance.json "${appdir}/usr/share/holder/release/holder-core-provenance.json"
+          if [[ -n "$RELEASE_MANIFEST" ]]; then
+            cp "sources/holder-staging/$RELEASE_MANIFEST" \
+              "${appdir}/usr/share/holder/release/holder-framework-release.json"
+          fi
 
           (
             cd "${appdir}"
@@ -411,6 +475,11 @@ jobs:
           require_file "${appdir}/usr/share/hunspell/en_GB.dic"
           require_file "${appdir}/usr/share/icons/Adwaita/index.theme"
           require_file "${appdir}/usr/share/holder/release/holder-appimage-provenance.json"
+          cmp out/core-provenance.json "${appdir}/usr/share/holder/release/holder-core-provenance.json"
+          jq -e --slurpfile core out/core-provenance.json \
+            '.core == $core[0]' "${appdir}/usr/share/holder/release/holder-appimage-provenance.json"
+          cmp work/backend-root/usr/share/holder-daemon/core-build.json \
+            "${appdir}/usr/share/holder-daemon/core-build.json"
 
           wm_schema="${appdir}/usr/share/glib-2.0/schemas/org.gnome.desktop.wm.preferences.gschema.xml"
           if [ -e "${wm_schema}" ]; then
@@ -490,6 +559,11 @@ jobs:
           export XDG_CACHE_HOME="${runtime_dir}/cache"
           export HOLDER_TEST_KEYSTORE_DIR="${runtime_dir}/keystore"
           APPIMAGE_EXTRACT_AND_RUN=1 HOLDER_APPRUN_SMOKE_TEST=1 "${appimage}"
+          # Verify provenance from inside the final packed artifact as well.
+          extract_dir="$(mktemp -d)"
+          (cd "$extract_dir" && "$appimage" --appimage-extract >/dev/null)
+          cmp out/core-provenance.json \
+            "$extract_dir/squashfs-root/usr/share/holder/release/holder-core-provenance.json"
 
       - name: Upload staged Linux package
         uses: actions/upload-artifact@v4
