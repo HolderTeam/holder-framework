@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APPDIR="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+multiarch="x86_64-linux-gnu"
+release_dir="${APPDIR}/usr/share/holder/release"
+pixbuf_cache_template="${APPDIR}/usr/lib/${multiarch}/gdk-pixbuf-2.0/2.10.0/loaders.cache.in"
+runtime_cache_dir="${XDG_CACHE_HOME:-${HOME}/.cache}/holder/appimage"
+
+install -d -m 0700 "${runtime_cache_dir}"
+escaped_appdir="$(printf '%s' "${APPDIR}" | sed 's/[&|]/\\&/g')"
+sed "s|@APPDIR@|${escaped_appdir}|g" \
+  "${pixbuf_cache_template}" \
+  > "${runtime_cache_dir}/gdk-pixbuf-loaders.cache"
+
+export PATH="${APPDIR}/usr/bin:${PATH}"
+export LD_LIBRARY_PATH="${APPDIR}/usr/lib:${APPDIR}/usr/lib/${multiarch}${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+export XDG_DATA_DIRS="${APPDIR}/usr/share${XDG_DATA_DIRS:+:${XDG_DATA_DIRS}}"
+export GSETTINGS_SCHEMA_DIR="${APPDIR}/usr/share/glib-2.0/schemas"
+export GIO_EXTRA_MODULES="${APPDIR}/usr/lib/${multiarch}/gio/modules"
+export GDK_PIXBUF_MODULEDIR="${APPDIR}/usr/lib/${multiarch}/gdk-pixbuf-2.0/2.10.0/loaders"
+export GDK_PIXBUF_MODULE_FILE="${runtime_cache_dir}/gdk-pixbuf-loaders.cache"
+export GTK_PATH="${APPDIR}/usr/lib/${multiarch}/gtk-4.0"
+export ENCHANT_CONFIG_DIR="${APPDIR}/usr/share/enchant-2"
+export DICPATH="${APPDIR}/usr/share/hunspell"
+
+version_at_least() {
+  [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n 1)" = "$1" ]
+}
+
+api_is_supported() {
+  local api_version="$1"
+  local minimum
+  local maximum_exclusive
+  minimum="$(cat "${release_dir}/holder-desktop-daemon-api-minimum.txt")"
+  maximum_exclusive="$(cat "${release_dir}/holder-desktop-daemon-api-maximum-exclusive.txt")"
+  version_at_least "${minimum}" "${api_version}" && \
+    ! version_at_least "${maximum_exclusive}" "${api_version}"
+}
+
+daemon_pid=""
+desktop_pid=""
+owns_daemon="false"
+
+cleanup() {
+  if [ -n "${desktop_pid}" ] && kill -0 "${desktop_pid}" 2>/dev/null; then
+    kill -TERM "${desktop_pid}" 2>/dev/null || true
+    wait "${desktop_pid}" 2>/dev/null || true
+  fi
+  if [ "${owns_daemon}" = "true" ] && \
+     [ -n "${daemon_pid}" ] && kill -0 "${daemon_pid}" 2>/dev/null; then
+    kill -TERM "${daemon_pid}" 2>/dev/null || true
+    wait "${daemon_pid}" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT HUP INT TERM
+
+if holderctl health >/dev/null 2>&1; then
+  api_version="$(holderctl health | sed -n 's/^API version: //p' | head -n 1)"
+  if [ -z "${api_version}" ] || ! api_is_supported "${api_version}"; then
+    echo "The running Holder daemon API (${api_version:-unknown}) is incompatible with this desktop." >&2
+    exit 1
+  fi
+else
+  daemon_log="${runtime_cache_dir}/holderd.log"
+  (
+    cd "${APPDIR}/usr/share/holder-daemon"
+    exec "${APPDIR}/usr/bin/holderd"
+  ) >>"${daemon_log}" 2>&1 &
+  daemon_pid=$!
+  owns_daemon="true"
+
+  daemon_ready="false"
+  for _ in $(seq 1 150); do
+    if holderctl health >/dev/null 2>&1; then
+      daemon_ready="true"
+      break
+    fi
+    if ! kill -0 "${daemon_pid}" 2>/dev/null; then
+      break
+    fi
+    sleep 0.1
+  done
+  if [ "${daemon_ready}" != "true" ]; then
+    echo "The bundled Holder daemon did not become ready. Log: ${daemon_log}" >&2
+    tail -n 100 "${daemon_log}" >&2 || true
+    exit 1
+  fi
+fi
+
+if [ "${HOLDER_APPRUN_SMOKE_TEST:-0}" = "1" ]; then
+  holderctl health
+  exit 0
+fi
+
+"${APPDIR}/usr/bin/holder-desktop" "$@" &
+desktop_pid=$!
+set +e
+wait "${desktop_pid}"
+desktop_status=$?
+set -e
+desktop_pid=""
+exit "${desktop_status}"
