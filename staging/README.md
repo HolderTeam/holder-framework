@@ -14,7 +14,7 @@ The Windows staged package workflow assembles the three Windows build outputs in
 
 - `holder-desktop-windows` from `HolderTeam/holder-desktop`
 - `holder-daemon-windows-backend` from core's downstream integration run
-- `holder-launcher-windows` from `HolderTeam/holder-launcher`
+- `holder-launcher-windows` from this repository's `windows-launcher.yml` (source in `launcher/`)
 
 Run it manually from:
 
