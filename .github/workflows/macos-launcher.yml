@@ -2,9 +2,15 @@ name: macOS launcher
 
 on:
   pull_request:
+    paths:
+      - 'launcher/**'
+      - '.github/workflows/macos-launcher.yml'
   push:
     branches:
       - main
+    paths:
+      - 'launcher/**'
+      - '.github/workflows/macos-launcher.yml'
   workflow_dispatch:
     inputs:
       build_type:
@@ -21,10 +27,13 @@ jobs:
     env:
       BUILD_TYPE: ${{ inputs.build_type || 'RelWithDebInfo' }}
     runs-on: macos-15
+    defaults:
+      run:
+        working-directory: launcher
 
     steps:
-      - name: Check out holder-launcher
-        uses: actions/checkout@v4
+      - name: Check out holder-framework
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Configure CMake
         run: |
@@ -46,9 +55,9 @@ jobs:
         run: python3 scripts/artifact.py verify build/artifacts/${{ inputs.build_type || 'RelWithDebInfo' }}
 
       - name: Upload launcher artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: holder-launcher-macos${{ inputs.build_type == 'Release' && '-release' || '' }}
-          path: build/artifacts/${{ inputs.build_type || 'RelWithDebInfo' }}/
+          path: launcher/build/artifacts/${{ inputs.build_type || 'RelWithDebInfo' }}/
           if-no-files-found: error
           retention-days: 90
