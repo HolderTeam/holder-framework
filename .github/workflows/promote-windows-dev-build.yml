@@ -4,14 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       staging_run_id:
-        description: holder-staging run ID that uploaded the Windows tester installer
+        description: holder-framework staging run ID that uploaded the Windows tester installer
         required: true
         type: string
       staging_repository:
         description: Repository containing the Windows staging artifact
         required: true
         type: string
-        default: HolderTeam/holder-staging
+        default: HolderTeam/holder-framework
       staging_artifact_name:
         description: Name of the Windows tester installer artifact
         required: true

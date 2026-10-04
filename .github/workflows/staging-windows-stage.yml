@@ -66,14 +66,14 @@ jobs:
     environment: ${{ inputs.sign_test_installer && 'windows-staging' || '' }}
 
     steps:
-      - name: Check out holder-staging
+      - name: Check out holder-framework
         uses: actions/checkout@v4
         with:
-          path: sources/holder-staging
+          path: sources/holder-framework
 
       - name: Test SDK provenance and artifact selection
         shell: bash
-        run: python3 -m unittest discover -s sources/holder-staging/tests -v
+        run: python3 -m unittest discover -s sources/holder-framework/staging/tests -v
 
       - name: Select development inputs or framework release pins
         id: pins
@@ -90,9 +90,9 @@ jobs:
         run: |
           options=()
           if [[ -n "$RELEASE_MANIFEST" ]]; then
-            options=(--release-manifest "sources/holder-staging/$RELEASE_MANIFEST")
+            options=(--release-manifest "sources/holder-framework/staging/$RELEASE_MANIFEST")
           fi
-          python3 sources/holder-staging/scripts/core-provenance.py prepare \
+          python3 sources/holder-framework/staging/scripts/core-provenance.py prepare \
             --platform windows "${options[@]}"
 
       - name: Resolve core SDK once
@@ -114,7 +114,7 @@ jobs:
           DESKTOP_REF: ${{ inputs.desktop_ref }}
           BACKEND_REPOSITORY: ${{ steps.pins.outputs.backend_repository }}
           LAUNCHER_REPOSITORY: ${{ steps.pins.outputs.launcher_repository }}
-        run: python3 sources/holder-staging/scripts/resolve-component-runs.py --platform windows --build-type "${{ steps.pins.outputs.build_type }}"
+        run: python3 sources/holder-framework/staging/scripts/resolve-component-runs.py --platform windows --build-type "${{ steps.pins.outputs.build_type }}"
 
       - name: Check out holder-desktop metadata
         uses: actions/checkout@v4
@@ -161,9 +161,9 @@ jobs:
         run: |
           options=()
           if [[ -n "$RELEASE_MANIFEST" ]]; then
-            options=(--release-manifest "sources/holder-staging/$RELEASE_MANIFEST")
+            options=(--release-manifest "sources/holder-framework/staging/$RELEASE_MANIFEST")
           fi
-          python3 sources/holder-staging/scripts/core-provenance.py verify \
+          python3 sources/holder-framework/staging/scripts/core-provenance.py verify \
             --selection out/core-selection.json --platform windows \
             --backend-root downloads/backend --desktop-root downloads/desktop \
             --launcher-root downloads/launcher --desktop-commit "$DESKTOP_COMMIT" \
@@ -239,7 +239,7 @@ jobs:
           $version = (Get-Content "$desktopSourceDir\VERSION" -Raw).Trim()
           if ($env:PRODUCT_VERSION) { $version = $env:PRODUCT_VERSION }
           if ($env:RELEASE_MANIFEST) {
-            Copy-Item "sources/holder-staging/$env:RELEASE_MANIFEST" -Destination "$releaseDir/holder-framework-release.json"
+            Copy-Item "sources/holder-framework/staging/$env:RELEASE_MANIFEST" -Destination "$releaseDir/holder-framework-release.json"
           }
           $metadataPath = Join-Path $releaseDir "release-candidate.json"
           $metadata = [ordered]@{
@@ -436,7 +436,7 @@ jobs:
           }
 
           if ($env:RELEASE_MANIFEST) {
-            $expected = "sources/holder-staging/$env:RELEASE_MANIFEST"
+            $expected = "sources/holder-framework/staging/$env:RELEASE_MANIFEST"
             $installed = Join-Path $installDir "release/holder-framework-release.json"
             if ((Get-FileHash $expected).Hash -ne (Get-FileHash $installed).Hash) {
               throw "Installed framework release manifest differs from selected pins"
@@ -644,7 +644,7 @@ jobs:
           }
 
           if ($env:RELEASE_MANIFEST) {
-            $expected = "sources/holder-staging/$env:RELEASE_MANIFEST"
+            $expected = "sources/holder-framework/staging/$env:RELEASE_MANIFEST"
             $installed = Join-Path $installDir "release/holder-framework-release.json"
             if ((Get-FileHash $expected).Hash -ne (Get-FileHash $installed).Hash) {
               throw "Installed framework release manifest differs from selected pins"

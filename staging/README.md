@@ -1,4 +1,4 @@
-# holder-staging
+# Staging
 Builds and stages Holder release candidates
 
 For a whole-framework RC or production release, use one
@@ -18,7 +18,7 @@ The Windows staged package workflow assembles the three Windows build outputs in
 
 Run it manually from:
 
-https://github.com/HolderTeam/holder-staging/actions/workflows/windows-stage.yml
+https://github.com/HolderTeam/holder-framework/actions/workflows/staging-windows-stage.yml
 
 By default, staging resolves core's latest-green SDK and selects successful
 desktop, core daemon-integration and launcher runs on main. All selected
@@ -56,7 +56,7 @@ The Linux AppImage workflow combines the native Ubuntu 24.04 artifacts from
 `holder-desktop` and `holder-daemon`, bundles their GTK/GIO runtime, and uploads
 both an AppImage and its assembled AppDir:
 
-https://github.com/HolderTeam/holder-staging/actions/workflows/linux-appimage-stage.yml
+https://github.com/HolderTeam/holder-framework/actions/workflows/staging-linux-appimage-stage.yml
 
 All workflow inputs are optional. Development staging resolves core's
 `latest-green` SDK once and selects the newest successful desktop main artifact
@@ -133,7 +133,7 @@ How to manually test a prerelease development version of Holder, aka a "staged c
 
 1. Go to the Mac OS staged app action:
 
-https://github.com/HolderTeam/holder-staging/actions/workflows/macos-stage.yml
+https://github.com/HolderTeam/holder-framework/actions/workflows/staging-macos-stage.yml
 
 2. Click on the latest (or your target) successful run.
 

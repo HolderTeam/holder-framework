@@ -8,13 +8,13 @@ on:
         required: true
         type: string
       staging_run_id:
-        description: Successful holder-staging Linux AppImage workflow run ID to sign
+        description: Successful holder-framework staging Linux AppImage workflow run ID to sign
         required: true
         type: string
       staging_repository:
         description: Repository containing the staged Linux AppImage artifact
         required: false
-        default: HolderTeam/holder-staging
+        default: HolderTeam/holder-framework
         type: string
       staging_artifact_name:
         description: Name of the staged Linux AppImage artifact
