@@ -1,6 +1,16 @@
 # Holder Framework
 
-Build staging, release signing and release publishing for Holder.
+**Your knowledge belongs to you.**
+
+Holder Framework turns your knowledge into something you can own, inspect, automate and build upon.
+
+Holder Framework is a complete, local-first knowledge system: a set of open tools for storing, organising, connecting and working with your information without surrendering control of it to somebody else's platform.
+
+It provides the services and interfaces that make Holder available to applications, scripts and people across different operating systems. Desktop clients, command-line tools and other software can all work with the same local knowledge through a stable OpenAPI interface, while your data remains in formats and repositories you control.
+
+Holder Core provides the underlying algorithms, data structures and formats. Holder Framework builds on that foundation to provide the running system around them: the Holder daemon, `holderctl`, application lifecycle support, packaging and the machinery used to build and release Holder across platforms.
+
+The goal is not simply to make another notes application. It is to provide a durable personal computing foundation for knowledge: open, interoperable, automatable and yours.
 
 ## Layout
 
