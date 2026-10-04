@@ -1,0 +1,28 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "holder-python"
+version = "0.1.0"
+description = "Low-level Python HTTP client for a running Holder daemon"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = ["httpx>=0.23.1,<0.29", "attrs>=22.2", "typing-extensions>=4.5"]
+
+[project.optional-dependencies]
+dev = [
+    "openapi-python-client==0.29.1",
+    "ruff==0.16.10",
+    "pytest>=8,<10",
+    "build>=1.2,<2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/holder"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
