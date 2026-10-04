@@ -1,0 +1,212 @@
+# holder-launcher
+
+Starts the Holder backend (`holderd`) if needed, waits for it to respond, then
+opens `holder-desktop`.
+
+## Windows
+
+Windows product launcher for Holder.
+
+`Holder.exe` is the user-facing Windows entrypoint. It keeps the GTK frontend
+focused on UI work by handling Windows startup policy:
+
+1. Check whether the local Holder backend is healthy.
+2. Start `holderd.exe` hidden if the backend is not running.
+3. Wait briefly for the backend to become ready.
+4. Start `holder-desktop.exe`.
+5. Exit.
+
+The launcher has no GTK, Qt, MSYS2, Boost, or curl dependency. It uses Win32 and
+WinHTTP directly.
+
+### Expected Layout
+
+Installer layout:
+
+```text
+Holder/
+  Holder.exe
+  bin/
+    holder-desktop.exe
+    holderd.exe
+    holderctl.exe
+```
+
+Developer side-by-side layout is also accepted:
+
+```text
+bin/
+  Holder.exe
+  holder-desktop.exe
+  holderd.exe
+  holderctl.exe
+```
+
+A child `bin` entry selects the installer layout, even when files are missing.
+Otherwise, a launcher inside a directory named `bin` (case-insensitive) uses the
+developer layout; all other locations use the installer layout. Missing files
+are reported in that layout. Restore the complete installation to recover.
+
+### Build
+
+From a Visual Studio developer shell:
+
+```powershell
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
+```
+
+The output executable is `build/Holder.exe`.
+
+### Tests
+
+Tests require Python 3 (standard library only):
+
+```powershell
+ctest --test-dir build --output-on-failure
+```
+
+With a Visual Studio generator, build with `--config RelWithDebInfo` and pass
+`-C RelWithDebInfo` to CTest. If Python is not on PATH, select an existing
+interpreter at configure time, for example
+`-DPython3_EXECUTABLE=C:/msys64/ucrt64/bin/python.exe` for an MSYS2 UCRT64 install.
+Configure with `-DBUILD_TESTING=OFF` to build only the launcher without Python.
+
+Tests use private loopback ports, temporary installations and fake children;
+they do not contact a running Holder backend, access user data or show dialogs.
+CI runs them before artifact upload.
+
+### Startup behavior
+
+The launcher checks `http://127.0.0.1:11499/ping` directly, without proxies or
+redirects, and expects HTTP 200 with body `pong`. It allows up to 60 seconds for
+backend readiness and opens the desktop as soon as the backend responds.
+Conflicting services and early backend exits produce an error. Concurrent
+launches can reuse the same backend; a timeout does not kill or restart it.
+
+### Diagnostics
+
+Failures are reported with a native Windows message box. The launcher also
+appends a small log to:
+
+```text
+%LOCALAPPDATA%\holder\launcher.log
+```
+
+The UTF-8 log records version, timestamps, installation paths and startup timing;
+it rotates at 256 KiB with one `.1` backup. Backend failures also show the expected
+daemon log path: normally `%USERPROFILE%\.local\share\holder\server\logs\server.log`,
+with `HOME` taking precedence over `USERPROFILE` and an absolute `XDG_DATA_HOME`
+overriding the data root.
+
+## macOS
+
+`Holder` is also the user-facing executable inside `Holder.app`.
+
+The macOS launcher has the same job as the Windows launcher:
+
+1. Check whether the local Holder backend responds to `GET /ping`.
+2. Start `holderd` if the backend is not running.
+3. Wait briefly for the backend to become ready.
+4. Replace itself with `holder-desktop`.
+
+The launcher has no GTK, Qt, Boost, curl, or Homebrew/MacPorts API dependency.
+It uses POSIX process launching and a tiny localhost socket probe. The frontend
+is launched with `exec` so macOS keeps the running app associated with
+`Holder.app` for Dock identity.
+
+### Expected Layout
+
+App bundle layout:
+
+```text
+Holder.app/
+  Contents/
+    MacOS/
+      Holder
+    Resources/
+      bin/
+        holder-desktop
+        holderd
+        holderctl
+      schema/
+      config/
+      assets/
+      share/
+      lib/
+```
+
+Developer side-by-side layout is also accepted:
+
+```text
+bin/
+  Holder
+  holder-desktop
+  holderd
+  holderctl
+```
+
+### Build
+
+On macOS:
+
+```sh
+cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
+```
+
+The output executable is `build/Holder`.
+
+The full app's minimum supported macOS version is not yet established.
+
+### Tests
+
+The default macOS build includes component and launcher integration tests.
+Python 3 is required (standard library only).
+
+```sh
+ctest --test-dir build --output-on-failure
+```
+
+Tests use temporary installations, fake child programs, and private loopback
+ports; they do not access your Holder data or show dialogs. macOS CI runs them
+before artifact upload. Configure with `-DBUILD_TESTING=OFF` to build only the
+launcher without requiring Python.
+
+### Startup behavior
+
+The launcher checks `127.0.0.1:11499` for HTTP 200 with body `pong`. It allows
+up to 60 seconds for backend readiness and opens the desktop as soon as the
+backend responds. Conflicting services and early backend exits produce an error.
+Concurrent launches can reuse the same backend; a timeout does not kill or
+restart it.
+
+Layout is determined by the resolved launcher location, not the working
+directory. App bundles use `Contents/Resources` as the runtime root; developer
+installs use the parent of `bin`. Missing bundle components produce an error
+rather than falling back to adjacent executables. Bundled GTK runtime variables
+are applied only to the desktop; the backend inherits the launcher's environment.
+Command-line arguments and file/URL activation are not forwarded.
+
+### Diagnostics
+
+Failures are reported with a native macOS alert. The launcher also appends a
+small log to:
+
+```text
+~/Library/Logs/Holder/launcher.log
+```
+
+The log includes timestamps, launcher version, and startup timing, and rotates
+at 256 KiB with one `.1` backup. Errors also go to stderr if an alert cannot be
+displayed. For backend failures, check `~/.local/share/holder/server/logs/server.log`
+(or `$XDG_DATA_HOME/holder/server/logs/server.log` when an absolute override is set).
+If a bundled executable is missing, restore or reinstall the complete app bundle.
+
+## Development status
+
+CI artifacts include build identity, SHA-256 checksums and debug symbols. See
+[build artifacts](docs/ARTIFACTS.md) for packaging, verification and release handoff.
+
+Implementation notes, validation history and remaining release work are tracked
+in the [release readiness plan](https://github.com/HolderTeam/holder-planning/blob/main/current/release/HOLDER_LAUNCHER_RELEASE_READINESS_PLAN.md).

@@ -1,0 +1,66 @@
+name: Windows launcher
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: Launcher configuration
+        type: choice
+        options: [RelWithDebInfo, Release]
+        default: RelWithDebInfo
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    env:
+      BUILD_TYPE: ${{ inputs.build_type || 'RelWithDebInfo' }}
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out holder-launcher
+        uses: actions/checkout@v4
+
+      - name: Set up MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Set up Python for tests
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Configure CMake
+        shell: pwsh
+        run: |
+          cmake `
+            -S . `
+            -B build `
+            -G Ninja `
+            "-DCMAKE_BUILD_TYPE=$env:BUILD_TYPE" `
+            -DCMAKE_CXX_COMPILER=cl `
+            -DBUILD_TESTING=ON
+
+      - name: Build launcher and tests
+        run: cmake --build build --parallel
+
+      - name: Test Windows probe and launcher
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Stage launcher artifact with provenance and symbols
+        run: cmake --build build --target stage_artifact
+
+      - name: Verify staged artifact checksums and inventory
+        run: python scripts/artifact.py verify build/artifacts/${{ inputs.build_type || 'RelWithDebInfo' }}
+
+      - name: Upload launcher artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: holder-launcher-windows${{ inputs.build_type == 'Release' && '-release' || '' }}
+          path: build/artifacts/${{ inputs.build_type || 'RelWithDebInfo' }}/
+          if-no-files-found: error
+          retention-days: 90
