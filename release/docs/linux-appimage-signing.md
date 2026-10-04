@@ -6,11 +6,15 @@ candidate. It deliberately does not create or update a GitHub release.
 
 ## Trust boundary
 
-The workflow lives in `holder-framework` so ordinary changes to Holder's source,
-build, and staging repositories cannot also change the signing policy. Configure
-the fixed `linux-release-signing` GitHub environment with required reviewers;
-the signing job cannot read that environment's secrets until a reviewer approves
-the job.
+The workflow lives in `holder-framework`, separate from Holder's source and
+component build repositories, so ordinary changes to those cannot also change
+the signing policy. Staging lives in this same repository, so the protection
+here is the environment rather than repository separation: configure the fixed
+`linux-release-signing` GitHub environment with required reviewers and restrict
+its deployment branches to `main`. The signing job cannot read that
+environment's secrets until a reviewer approves the job. The signing and
+promotion paths are listed in `.github/CODEOWNERS`, ready to be enforced by a
+branch ruleset when the project has more than one maintainer.
 
 The workflow:
 
