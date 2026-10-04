@@ -88,6 +88,12 @@ gh attestation verify Holder-<version>-x86_64.AppImage \
   --repo HolderTeam/holder-framework
 ```
 
+This repository was previously named `holder-release`, and an attestation
+records the repository name from the time it was signed. Releases up to and
+including 0.2.1 were signed under the old name, so verify those with
+`--repo HolderTeam/holder-release`. Later releases use
+`--repo HolderTeam/holder-framework`.
+
 The detached manifest signature is the straightforward end-user verification
 path. The AppImage also contains an embedded OpenPGP signature for AppImage-aware
 tools.
