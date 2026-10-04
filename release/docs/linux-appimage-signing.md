@@ -1,7 +1,7 @@
 # Linux AppImage signing
 
 `Sign Linux AppImage release candidate` turns one exact, successful
-`HolderTeam/holder-staging` AppImage artifact into a signed and tested release
+`HolderTeam/holder-framework` AppImage artifact into a signed and tested release
 candidate. It deliberately does not create or update a GitHub release.
 
 ## Trust boundary
@@ -53,7 +53,7 @@ secrets.
 
 Cross-repository artifact downloads may also require the existing repository or
 organisation secret `HOLDER_CI_ARTIFACT_TOKEN`. It needs only Actions read access
-to `HolderTeam/holder-staging`; it is not a signing secret.
+to `HolderTeam/holder-framework`; it is not a signing secret.
 
 ## Running the workflow
 
