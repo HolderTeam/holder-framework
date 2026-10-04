@@ -1,0 +1,32 @@
+Source: holder-daemon
+Section: utils
+Priority: optional
+Maintainer: Holder Team <holdercardteam@gmail.com>
+Build-Depends: debhelper-compat (= 13),
+ cmake,
+ ninja-build,
+ pkgconf,
+ libboost-filesystem-dev,
+ libboost-process-dev | libboost1.83-dev,
+ libssl-dev,
+ libsqlite3-dev,
+ nlohmann-json3-dev,
+ libspdlog-dev,
+ libyaml-cpp-dev,
+ xdg-utils-cxx-dev,
+ libgit2-dev,
+ libmd4c-dev,
+ libsodium-dev,
+ libsecret-1-dev,
+ libcaste-dev,
+ libholder-dev (>= 0.2.0)
+Standards-Version: 4.6.2
+Homepage: https://holder.team/
+Rules-Requires-Root: no
+
+Package: holder-daemon
+Architecture: any
+Depends: init-system-helpers (>= 1.66~), ${shlibs:Depends}, ${misc:Depends}
+Description: Local-first backend daemon for Holder
+ Holderd stores card data, projects, search indexes, resources, git sync state,
+ and AI workflow state for Holder frontends.

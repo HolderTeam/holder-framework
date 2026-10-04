@@ -1,0 +1,130 @@
+name: Windows backend
+
+on:
+  workflow_call:
+    inputs:
+      core_commit:
+        required: true
+        type: string
+      build_type:
+        description: SDK and daemon configuration
+        type: string
+        default: RelWithDebInfo
+      daemon_commit:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out holder-daemon
+        uses: actions/checkout@v4
+        with:
+          repository: HolderTeam/holder-daemon
+          ref: ${{ inputs.daemon_commit }}
+          persist-credentials: false
+
+      - name: Prepare caste source dependency
+        shell: bash
+        run: git submodule update --init --recursive -- submodules/caste
+
+      - uses: HolderTeam/holder-core/.github/actions/core-sdk@main
+        with:
+          commit: ${{ inputs.core_commit }}
+          build-type: ${{ inputs.build_type }}
+
+      - name: Set up MSVC developer environment
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Set vcpkg paths
+        shell: pwsh
+        run: |
+          "VCPKG_ROOT=${{ github.workspace }}\.vcpkg" >> $env:GITHUB_ENV
+          "VCPKG_DEFAULT_BINARY_CACHE=${{ github.workspace }}\.vcpkg-binary-cache" >> $env:GITHUB_ENV
+
+      - name: Restore vcpkg binary package cache
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('packaging/windows/sdk-deps/vcpkg.json', 'CMakePresets.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-${{ hashFiles('packaging/windows/sdk-deps/vcpkg.json', 'CMakePresets.json') }}-
+            vcpkg-${{ runner.os }}-
+
+      - name: Bootstrap vcpkg
+        shell: pwsh
+        run: |
+          git clone https://github.com/microsoft/vcpkg "$env:VCPKG_ROOT"
+          & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
+          New-Item -ItemType Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
+
+      - name: Configure CMake
+        shell: pwsh
+        run: cmake --preset windows-sdk-tests "-DCMAKE_BUILD_TYPE=$env:HOLDER_CORE_BUILD_TYPE"
+
+      - name: Save vcpkg binary package cache
+        if: success() && github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ env.VCPKG_DEFAULT_BINARY_CACHE }}
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('packaging/windows/sdk-deps/vcpkg.json', 'CMakePresets.json') }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Build backend executables and tests
+        run: cmake --build --preset windows-sdk-tests --parallel
+
+      - name: Run tests
+        run: ctest --preset windows-sdk-tests
+
+      - name: Stage backend artifact
+        shell: pwsh
+        run: |
+          $buildDir = "out\build\windows-sdk-tests"
+          $stageDir = "out\artifacts\windows-backend"
+
+          New-Item -ItemType Directory -Force $stageDir | Out-Null
+          Copy-Item "$buildDir\holderd.exe", "$buildDir\holderctl.exe" -Destination $stageDir
+          Copy-Item "$buildDir\schema", "$buildDir\config", "$buildDir\assets" -Destination $stageDir -Recurse
+          Copy-Item "$buildDir\openapi.yaml", "$buildDir\core-build.json" -Destination $stageDir
+          New-Item -ItemType Directory -Force "$stageDir/release" | Out-Null
+          git rev-parse HEAD | Set-Content -Encoding ascii "$stageDir/release/holder-daemon-commit.txt"
+          (Get-Content VERSION -Raw).Trim() | Set-Content -Encoding ascii "$stageDir/release/holder-daemon-version.txt"
+          (Get-Content API_VERSION -Raw).Trim() | Set-Content -Encoding ascii "$stageDir/release/holder-daemon-api-version.txt"
+          Copy-Item "$env:HOLDER_CORE_SDK/share/vcpkg-licenses" -Destination $stageDir -Recurse
+          $boostLicenses = Get-ChildItem "out/vcpkg-installed/x64-windows/share/boost*/copyright"
+          foreach ($license in $boostLicenses) {
+            Copy-Item $license.FullName -Destination "$stageDir/vcpkg-licenses/$($license.Directory.Name).txt"
+          }
+
+          $dllDirs = @(
+            $buildDir,
+            "out\vcpkg-installed\x64-windows\bin",
+            "$env:HOLDER_CORE_SDK/bin"
+          )
+
+          foreach ($dir in $dllDirs) {
+            if (Test-Path $dir) {
+              Get-ChildItem $dir -Filter "*.dll" | Copy-Item -Destination $stageDir -Force
+            }
+          }
+
+      - name: Smoke-test staged executables
+        shell: pwsh
+        run: |
+          Push-Location "out\artifacts\windows-backend"
+          & ".\holderd.exe" --help
+          & ".\holderd.exe" --version
+          & ".\holderctl.exe" --help
+          Pop-Location
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: holder-daemon-windows-backend${{ inputs.build_type == 'Release' && '-release' || '' }}
+          path: out/artifacts/windows-backend/*
+          if-no-files-found: error
+          retention-days: 7

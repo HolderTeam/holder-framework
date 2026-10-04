@@ -1,0 +1,81 @@
+#include "cli/commands/Commands.h"
+#include "cli/commands/Common.h"
+#include "platform/Paths.h"
+
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+#ifndef CARD_SERVER_VERSION
+#define CARD_SERVER_VERSION "0.0.0"
+#endif
+
+int main(int argc, char* argv[]) {
+  const bool json_output = holder::cli::json_output_requested(argc, argv);
+  try {
+    if (argc < 2 || std::string(argv[1]) == "--help" || std::string(argv[1]) == "-h") {
+      holder::cli::print_usage(std::cout);
+      return 0;
+    }
+
+    const std::string command = argv[1];
+    if (command == "--version" || command == "version") {
+      std::cout << "holderctl " << CARD_SERVER_VERSION << "\n";
+      return 0;
+    }
+    if (command == "restart") return holder::cli::command_restart();
+    if (command == "database") return holder::cli::command_database(argc, argv, argv[0]);
+
+    const auto paths = holder::core::Paths::resolve("holder");
+    if (command == "token") return holder::cli::command_token(paths);
+    if (command == "status") return holder::cli::command_status(paths);
+    if (command == "health") return holder::cli::command_health(paths);
+    if (command == "paths") return holder::cli::command_paths(paths);
+    if (command == "project") return holder::cli::command_project(paths, argc, argv);
+    if (command == "projects") return holder::cli::command_projects(paths, argc, argv);
+    if (command == "use") return holder::cli::command_use(paths, argc, argv);
+    if (command == "current") return holder::cli::command_current(paths, argc);
+    if (command == "sync") return holder::cli::command_sync(paths, argc, argv);
+    if (command == "cards") return holder::cli::command_cards(paths, argc, argv);
+    if (command == "tags") return holder::cli::command_tags(paths, argc, argv);
+    if (command == "tag") return holder::cli::command_tag(paths, argc, argv);
+    if (command == "search") return holder::cli::command_search(paths, argc, argv);
+    if (command == "card") return holder::cli::command_card(paths, argc, argv);
+    if (command == "history") return holder::cli::command_history(paths, argc, argv);
+    if (command == "milestones") return holder::cli::command_milestones(paths, argc, argv);
+    if (command == "milestone") return holder::cli::command_milestone(paths, argc, argv);
+    if (command == "calendar") return holder::cli::command_calendar(paths, argc, argv);
+    if (command == "edit") return holder::cli::command_edit(paths, argc, argv);
+    if (command == "links") return holder::cli::command_links(paths, argc, argv);
+    if (command == "backlinks") return holder::cli::command_backlinks(paths, argc, argv);
+    if (command == "link") return holder::cli::command_link(paths, argc, argv);
+    if (command == "trash") return holder::cli::command_trash(paths, argc, argv);
+    if (command == "restore") return holder::cli::command_restore(paths, argc, argv);
+    if (command == "new") return holder::cli::command_new(paths, argc, argv);
+    if (command == "append") return holder::cli::command_append(paths, argc, argv);
+    if (command == "resource") return holder::cli::command_resource(paths, argc, argv);
+    if (command == "recovery-token") return holder::cli::command_recovery_token(paths, argc, argv);
+    if (command == "openapi") return holder::cli::command_openapi(paths, argc, argv);
+    if (command == "logs") return holder::cli::command_logs(paths, argc, argv);
+    if (command == "reindex") return holder::cli::command_reindex(paths, argc);
+
+    if (!json_output) {
+      std::cerr << "Unknown command: " << command << "\n";
+      holder::cli::print_usage(std::cerr);
+      return 2;
+    }
+    throw holder::cli::CliError(
+        "unknown_command",
+        "Unknown command: " + command,
+        {{"command", command}},
+        "",
+        2
+    );
+  } catch (const holder::cli::CliError& ex) {
+    holder::cli::print_cli_error(std::cerr, ex, json_output);
+    return ex.exit_code();
+  } catch (const std::exception& ex) {
+    holder::cli::print_cli_error(std::cerr, ex, json_output);
+    return 1;
+  }
+}

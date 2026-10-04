@@ -1,0 +1,500 @@
+#include "api/routes/HistoryRoutes.h"
+
+#include "api/support/HttpResponses.h"
+#include "api/support/Time.h"
+
+#include "card/CardStore.h"
+#include "git/GitRepo.h"
+#include "git/RepoLocks.h"
+#include "git/RevisionReferenceResolver.h"
+#include "history/CardHistory.h"
+#include "history/ProjectHistory.h"
+#include "privacy/PrivacyError.h"
+#include "project/ProjectRepo.h"
+
+#include <boost/beast/http.hpp>
+#include <nlohmann/json.hpp>
+
+#include <algorithm>
+#include <cctype>
+#include <mutex>
+#include <optional>
+#include <stdexcept>
+#include <string>
+
+namespace holder::api::routes {
+namespace {
+
+namespace http = boost::beast::http;
+
+constexpr std::size_t kMaxHistoryResponseBytes = 2 * 1024 * 1024;
+
+struct HistoryPath {
+  enum class Scope { Project, Card };
+  std::string project_id;
+  std::string card_id;
+  Scope scope = Scope::Card;
+  bool compare = false;
+  bool restore = false;
+  bool snapshot = false;
+};
+
+std::optional<HistoryPath> parse_history_path(const std::string& path) {
+  static const std::string projects = "/projects/";
+  static const std::string project_history = "/history";
+  static const std::string card_history = "/history/cards/";
+  if (path.rfind(projects, 0) != 0) return std::nullopt;
+  const auto project_end = path.find('/', projects.size());
+  if (project_end == std::string::npos) return std::nullopt;
+  HistoryPath parsed;
+  parsed.project_id = path.substr(projects.size(), project_end - projects.size());
+  if (parsed.project_id.empty()) return std::nullopt;
+  if (path.substr(project_end) == project_history) {
+    parsed.scope = HistoryPath::Scope::Project;
+    return parsed;
+  }
+  if (path.compare(project_end, card_history.size(), card_history) != 0) return std::nullopt;
+  const auto card_start = project_end + card_history.size();
+  const auto suffix = path.find('/', card_start);
+  parsed.card_id = path.substr(card_start, suffix - card_start);
+  if (parsed.card_id.empty()) return std::nullopt;
+  if (suffix == std::string::npos) return parsed;
+  if (path.substr(suffix) == "/compare")
+    parsed.compare = true;
+  else if (path.substr(suffix) == "/restore")
+    parsed.restore = true;
+  else if (path.substr(suffix) == "/snapshot")
+    parsed.snapshot = true;
+  else
+    return std::nullopt;
+  return parsed;
+}
+
+nlohmann::json entry_json(const holder::history::CardHistoryEntry& entry) {
+  nlohmann::json saves = nlohmann::json::array();
+  for (const auto& save : entry.saves) {
+    saves.push_back({
+        {"oid", save.oid},
+        {"parent_oids", save.parent_oids},
+        {"authored_at", save.authored_at},
+        {"committed_at", save.committed_at},
+        {"message", save.message},
+    });
+  }
+  return {
+      {"first_oid", entry.first_oid},
+      {"last_oid", entry.last_oid},
+      {"parent_oids", entry.parent_oids},
+      {"visible_parent_oids", entry.visible_parent_oids},
+      {"author", {{"name", entry.author_name}, {"email", entry.author_email}}},
+      {"started_at", entry.started_at},
+      {"ended_at", entry.ended_at},
+      {"kind", entry.kind},
+      {"summary", entry.summary},
+      {"commit_count", entry.commit_count},
+      {"is_merge", entry.is_merge},
+      {"saves", std::move(saves)},
+  };
+}
+
+nlohmann::json version_json(const holder::history::CardVersion& version) {
+  return {
+      {"exists", version.exists},
+      {"oid", version.oid},
+      {"title", version.title},
+      {"body", version.body},
+  };
+}
+
+nlohmann::json project_activity_json(const holder::history::ProjectHistoryActivity& activity) {
+  nlohmann::json affected_objects = nlohmann::json::array();
+  for (const auto& object : activity.affected_objects) {
+    nlohmann::json paths = nlohmann::json::array();
+    nlohmann::json items = nlohmann::json::array();
+    for (const auto& item : object.items) {
+      paths.push_back(item.path);
+      nlohmann::json json_item = {{"path", item.path}};
+      if (item.title.has_value()) json_item["title"] = *item.title;
+      if (item.detail.has_value()) json_item["detail"] = *item.detail;
+      items.push_back(std::move(json_item));
+    }
+    // LCOV_EXCL_START: GCC reports nested initializer cleanup as an unexecuted duplicate.
+    affected_objects.push_back({
+        {"kind", holder::history::project_history_object_kind_name(object.kind)},
+        // Keep paths for compatibility with existing API consumers; items carries
+        // optional historical display metadata for the richer History UI.
+        {"paths", std::move(paths)},
+        {"items", std::move(items)},
+    });
+    // LCOV_EXCL_STOP
+  }
+  return {
+      {"oid", activity.oid},
+      {"parent_oids", activity.parent_oids},
+      {"author", {{"name", activity.author_name}, {"email", activity.author_email}}},
+      {"authored_at", activity.authored_at},
+      {"committed_at", activity.committed_at},
+      {"message", activity.message},
+      {"affected_objects", std::move(affected_objects)},
+      {"is_merge", activity.is_merge},
+  };
+}
+
+std::optional<holder::history::ProjectHistoryObjectKind> project_history_kind(const std::string& raw
+) {
+  if (raw.empty()) return std::nullopt;
+  using Kind = holder::history::ProjectHistoryObjectKind;
+  if (raw == "card") return Kind::Card;
+  if (raw == "resource") return Kind::Resource;
+  if (raw == "location") return Kind::Location;
+  if (raw == "ai_data") return Kind::AiData;
+  if (raw == "project_settings") return Kind::ProjectSettings;
+  if (raw == "unknown") return Kind::Unknown;
+  throw std::invalid_argument("kind must be a supported project history object kind");
+}
+
+std::size_t history_limit(const std::string& raw) {
+  if (raw.empty()) return 50;
+  try {
+    std::size_t consumed = 0;
+    const auto value = std::stoul(raw, &consumed);
+    if (consumed == raw.size() && value > 0 && value <= 200) return value;
+  } catch (const std::exception&) {
+    // Normalize all numeric parsing failures into the public validation error below.
+  }
+  throw std::invalid_argument("limit must be between 1 and 200");
+}
+
+bool valid_oid(const std::string& value) {
+  return value.size() == 40 && std::all_of(value.begin(), value.end(), [](unsigned char ch) {
+           return std::isxdigit(ch) != 0;
+         });
+}
+
+bool map_revision_reference_result(
+    const holder::git::RevisionReferenceResult& result,
+    const std::string& reference,
+    const std::string& parameter_name,
+    http::response<http::string_body>& res
+) {
+  switch (result.status) {
+  case holder::git::RevisionReferenceStatus::Resolved:
+    return true;
+  case holder::git::RevisionReferenceStatus::Ambiguous:
+    res = support::error_response(
+        http::status::conflict,
+        "revision_ambiguous",
+        parameter_name + " revision reference is ambiguous: " + reference
+    );
+    return false;
+  case holder::git::RevisionReferenceStatus::NotFound:
+    res = support::error_response(
+        http::status::not_found,
+        "revision_not_found",
+        parameter_name + " revision was not found: " + reference
+    );
+    return false;
+  }
+  throw std::runtime_error("unknown revision reference status"); // LCOV_EXCL_LINE
+}
+
+bool resolve_revision_reference(
+    const holder::model::Project& project,
+    const std::string& reference,
+    const std::string& parameter_name,
+    http::response<http::string_body>& res,
+    std::string& resolved_oid
+) {
+  if (reference.empty()) {
+    res = support::error_response(
+        http::status::bad_request,
+        "bad_request",
+        parameter_name + " revision reference is required."
+    );
+    return false;
+  }
+
+  holder::git::GitRepo repo;
+  repo.open_existing(project.root_path);
+  const auto result = holder::git::RevisionReferenceResolver(repo).resolve(reference);
+  if (!map_revision_reference_result(result, reference, parameter_name, res)) return false;
+  resolved_oid = result.oid.value();
+  return true;
+}
+
+bool exceeds_history_response_limit(const nlohmann::json& payload) {
+  return payload.dump().size() > kMaxHistoryResponseBytes;
+}
+
+} // namespace
+
+bool handle_history_routes(
+    const std::string& path,
+    const http::request<http::string_body>& req,
+    http::response<http::string_body>& res,
+    holder::platform::Db& db,
+    const std::function<std::string(const std::string&)>& param_get,
+    holder::card::CardStore* card_store
+) {
+  const auto parsed = parse_history_path(path);
+  if (!parsed.has_value()) return false;
+
+  try {
+    const auto project = holder::project::ProjectRepo(db).get(parsed->project_id);
+    if (!project.has_value()) {
+      res = support::error_response(http::status::not_found, "not_found", "Project not found.");
+      return true;
+    }
+
+    if (parsed->restore) {
+      if (req.method() != http::verb::post) {
+        res = support::error_response(
+            http::status::method_not_allowed,
+            "method_not_allowed",
+            "Method not allowed."
+        );
+        return true;
+      }
+      if (card_store == nullptr) {
+        res = support::error_response(
+            http::status::not_implemented,
+            "not_implemented",
+            "Card store unavailable."
+        );
+        return true;
+      }
+      const auto repo_mutex = holder::git::repo_mutex_for(project->root_path);
+      const std::lock_guard<std::recursive_mutex> repo_guard(*repo_mutex);
+      std::string oid;
+      if (!resolve_revision_reference(*project, param_get("oid"), "oid", res, oid)) return true;
+      const auto card = card_store->get(parsed->card_id);
+      if (!card.has_value() || card->project_id != project->project_id) {
+        res = support::error_response(http::status::not_found, "not_found", "Card not found.");
+        return true;
+      }
+      card_store->restore_version(parsed->card_id, oid, support::now_epoch_seconds());
+      const auto restored = card_store->get(parsed->card_id);
+      if (!restored.has_value()) {
+        throw std::runtime_error("restored card is missing"); // LCOV_EXCL_LINE
+      }
+      holder::git::GitRepo repo;
+      repo.open_existing(project->root_path);
+      const auto result_oid = repo.head_oid();
+      if (!result_oid.has_value()) {
+        throw std::runtime_error("restored revision is missing"); // LCOV_EXCL_LINE
+      }
+      res = support::json_response(
+          http::status::ok,
+          {{"ok", true},
+           {"data",
+            {{"card_id", parsed->card_id},
+             {"restored_from_oid", oid},
+             {"result_oid", *result_oid},
+             {"title", restored->title},
+             {"updated_at", restored->updated_at},
+             {"deleted_at",
+              restored->deleted_at.has_value() ? nlohmann::json(*restored->deleted_at)
+                                               : nlohmann::json(nullptr)}}}}
+      );
+      return true;
+    }
+    if (req.method() != http::verb::get) {
+      res = support::error_response(
+          http::status::method_not_allowed,
+          "method_not_allowed",
+          "Method not allowed."
+      );
+      return true;
+    }
+
+    const auto cursor_text = param_get("cursor");
+    if (!cursor_text.empty() && !valid_oid(cursor_text)) {
+      throw std::invalid_argument("cursor must be a full commit OID");
+    }
+    const auto cursor = cursor_text.empty() ? std::optional<std::string>{}
+                                            : std::optional<std::string>{cursor_text};
+
+    if (parsed->scope == HistoryPath::Scope::Project) {
+      holder::history::ProjectHistoryService history;
+      const auto page = history.list(
+          *project,
+          history_limit(param_get("limit")),
+          cursor,
+          project_history_kind(param_get("kind"))
+      );
+      nlohmann::json activities = nlohmann::json::array();
+      for (const auto& activity : page.activities)
+        activities.push_back(project_activity_json(activity));
+      nlohmann::json payload = {
+          {"ok", true},
+          {"data",
+           {{"head_oid",
+             page.head_oid.has_value() ? nlohmann::json(*page.head_oid) : nlohmann::json(nullptr)},
+            {"activities", std::move(activities)},
+            {"next_cursor",
+             page.next_cursor.has_value() ? nlohmann::json(*page.next_cursor)
+                                          : nlohmann::json(nullptr)},
+            {"scan_limited", page.scan_limited}}}
+      };
+      if (exceeds_history_response_limit(payload)) {
+        res = support::error_response(
+            http::status::payload_too_large,
+            "history_response_too_large",
+            "History response exceeds the 2 MiB limit."
+        );
+        return true;
+      }
+      res = support::json_response(http::status::ok, payload);
+      return true;
+    }
+
+    holder::history::CardHistoryService history;
+    if (parsed->snapshot) {
+      std::string oid;
+      if (!resolve_revision_reference(*project, param_get("oid"), "oid", res, oid)) return true;
+      const auto snapshot =
+          history.compare(*project, parsed->card_id, std::nullopt, std::optional<std::string>{oid})
+              .to;
+      const nlohmann::json payload = {
+          {"ok", true},
+          {"data", {{"card_id", parsed->card_id}, {"snapshot", version_json(snapshot)}}}
+      };
+      if (exceeds_history_response_limit(payload)) {
+        res = support::error_response(
+            http::status::payload_too_large,
+            "history_response_too_large",
+            "History response exceeds the 2 MiB limit."
+        );
+        return true;
+      }
+      res = support::json_response(http::status::ok, payload);
+      return true;
+    }
+    if (!parsed->compare) {
+      const auto page =
+          history.list(*project, parsed->card_id, history_limit(param_get("limit")), cursor);
+      nlohmann::json entries = nlohmann::json::array();
+      for (const auto& entry : page.entries)
+        entries.push_back(entry_json(entry));
+      nlohmann::json payload = {
+          {"ok", true},
+          {"data",
+           {{"head_oid",
+             page.head_oid.has_value() ? nlohmann::json(*page.head_oid) : nlohmann::json(nullptr)},
+            {"entries", std::move(entries)},
+            {"next_cursor",
+             page.next_cursor.has_value() ? nlohmann::json(*page.next_cursor)
+                                          : nlohmann::json(nullptr)},
+            {"scan_limited", page.scan_limited}}}
+      };
+      if (exceeds_history_response_limit(payload)) {
+        res = support::error_response(
+            http::status::payload_too_large,
+            "history_response_too_large",
+            "History response exceeds the 2 MiB limit."
+        );
+        return true;
+      }
+      res = support::json_response(http::status::ok, payload);
+      return true;
+    }
+
+    const auto mode_text = param_get("mode");
+    const auto mode = mode_text.empty() ? std::string("since") : mode_text;
+    if (mode != "since" && mode != "change") {
+      res = support::error_response(
+          http::status::bad_request,
+          "bad_request",
+          "mode must be either since or change."
+      );
+      return true;
+    }
+    const auto from_text = param_get("from");
+    const auto to_text = param_get("to");
+    if (to_text.empty() || (mode == "since" && from_text.empty())) {
+      res = support::error_response(
+          http::status::bad_request,
+          "bad_request",
+          mode == "since" ? "from and to revision references are required."
+                          : "to revision reference is required."
+      );
+      return true;
+    }
+    holder::history::CardHistoryComparison comparison;
+    if (mode == "change") {
+      auto change = history.compare_change(*project, parsed->card_id, to_text);
+      if (!map_revision_reference_result(change.revision, to_text, "to", res)) return true;
+      // LCOV_EXCL_START: a resolved comparison is an invariant of compare_change.
+      if (!change.comparison.has_value()) {
+        throw std::runtime_error("resolved history change is missing its comparison");
+      }
+      // LCOV_EXCL_STOP
+      comparison = std::move(*change.comparison);
+    } else {
+      std::string from_oid;
+      std::string to_oid;
+      if (!resolve_revision_reference(*project, from_text, "from", res, from_oid)) return true;
+      if (!resolve_revision_reference(*project, to_text, "to", res, to_oid)) return true;
+      comparison = history.compare(
+          *project,
+          parsed->card_id,
+          std::optional<std::string>{from_oid},
+          std::optional<std::string>{to_oid}
+      );
+    }
+    nlohmann::json lines = nlohmann::json::array();
+    for (const auto& line : comparison.lines) {
+      lines.push_back({
+          {"origin", std::string(1, line.origin)},
+          {"text", line.text},
+          {"old_line", line.old_line < 0 ? nlohmann::json(nullptr) : nlohmann::json(line.old_line)},
+          {"new_line", line.new_line < 0 ? nlohmann::json(nullptr) : nlohmann::json(line.new_line)},
+      });
+    }
+    nlohmann::json payload = {
+        {"ok", true},
+        {"data",
+         {{"from", version_json(comparison.from)},
+          {"to", version_json(comparison.to)},
+          {"summary", comparison.summary},
+          {"lines", std::move(lines)},
+          {"truncated", comparison.truncated}}}
+    };
+    if (exceeds_history_response_limit(payload)) {
+      res = support::error_response(
+          http::status::payload_too_large,
+          "history_response_too_large",
+          "History response exceeds the 2 MiB limit."
+      );
+      return true;
+    }
+    res = support::json_response(http::status::ok, payload);
+  } catch (const std::invalid_argument& ex) {
+    res = support::error_response(http::status::bad_request, "bad_request", ex.what());
+  } catch (const holder::privacy::PrivacyError& ex) {
+    res = history_privacy_error_response(ex);
+  } catch (const std::exception& ex) {
+    res = support::error_response(
+        http::status::service_unavailable,
+        "history_unavailable",
+        ex.what()
+    );
+  }
+  return true;
+}
+
+http::response<http::string_body> history_privacy_error_response(
+    const holder::privacy::PrivacyError& error
+) {
+  if (error.code() == holder::privacy::PrivacyErrorCode::KeyMaterialMissing ||
+      error.code() == holder::privacy::PrivacyErrorCode::KeyringUnavailable) {
+    return support::error_response(http::status::conflict, "history_key_unavailable", error.what());
+  }
+  return support::error_response(
+      http::status::service_unavailable,
+      "history_unavailable",
+      error.what()
+  );
+}
+
+} // namespace holder::api::routes
