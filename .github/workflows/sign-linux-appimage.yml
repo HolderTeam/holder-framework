@@ -62,7 +62,7 @@ jobs:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
         run: |
           set -euo pipefail
-          scripts/linux/verify-staged-appimage.sh \
+          release/scripts/linux/verify-staged-appimage.sh \
             downloads/linux-staged \
             "${EXPECTED_VERSION}" \
             work/verified
@@ -114,7 +114,7 @@ jobs:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
         run: |
           set -euo pipefail
-          scripts/linux/verify-staged-appimage.sh \
+          release/scripts/linux/verify-staged-appimage.sh \
             downloads/linux-staged \
             "${EXPECTED_VERSION}" \
             work/signing-input
@@ -144,12 +144,12 @@ jobs:
           HOLDER_GPG_SIGNING_PASSPHRASE: ${{ secrets.HOLDER_GPG_SIGNING_PASSPHRASE }}
         run: |
           set -euo pipefail
-          scripts/linux/sign-appimage-candidate.sh \
+          release/scripts/linux/sign-appimage-candidate.sh \
             work/signing-input \
             out/linux-release-candidate \
             out/tools/appimagetool-x86_64.AppImage \
             out/tools/runtime-x86_64 \
-            keys/holder-linux-release.asc \
+            release/keys/holder-linux-release.asc \
             "${{ inputs.staging_repository }}" \
             "${{ inputs.staging_run_id }}" \
             "${GITHUB_REPOSITORY}" \
@@ -162,10 +162,10 @@ jobs:
           EXPECTED_VERSION: ${{ inputs.expected_version }}
         run: |
           set -euo pipefail
-          scripts/linux/verify-signed-appimage.sh \
+          release/scripts/linux/verify-signed-appimage.sh \
             out/linux-release-candidate \
             "${EXPECTED_VERSION}" \
-            keys/holder-linux-release.asc
+            release/keys/holder-linux-release.asc
 
       - name: Create GitHub artifact attestation
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
@@ -181,7 +181,7 @@ jobs:
           appimage="Holder-${EXPECTED_VERSION}-x86_64.AppImage"
           checksum="$(sha256sum "${candidate_dir}/${appimage}" | cut -d ' ' -f 1)"
           fingerprint="$(
-            gpg --batch --with-colons --show-keys keys/holder-linux-release.asc |
+            gpg --batch --with-colons --show-keys release/keys/holder-linux-release.asc |
               awk -F: '$1 == "fpr" { print $10; exit }'
           )"
           {

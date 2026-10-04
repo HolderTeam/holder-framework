@@ -106,10 +106,10 @@ jobs:
           metadata="${candidate_dir}/Holder-${EXPECTED_VERSION}-signing-metadata.json"
           chmod 0755 "${appimage}"
 
-          scripts/linux/verify-signed-appimage.sh \
+          release/scripts/linux/verify-signed-appimage.sh \
             "${candidate_dir}" \
             "${EXPECTED_VERSION}" \
-            keys/holder-linux-release.asc
+            release/keys/holder-linux-release.asc
 
           jq -e \
             --arg repository "${GITHUB_REPOSITORY}" \
@@ -169,7 +169,7 @@ jobs:
           metadata="${candidate_dir}/Holder-${EXPECTED_VERSION}-signing-metadata.json"
 
           if ! cmp -s \
-            keys/holder-linux-release.asc \
+            release/keys/holder-linux-release.asc \
             "${candidate_dir}/${public_key_name}"; then
             echo "Candidate public key differs from holder-framework policy." >&2
             exit 1
@@ -192,7 +192,7 @@ jobs:
           trap cleanup EXIT
           chmod 0700 "${verification_home}"
           export GNUPGHOME="${verification_home}"
-          gpg --batch --quiet --import keys/holder-linux-release.asc
+          gpg --batch --quiet --import release/keys/holder-linux-release.asc
           gpg --batch --verify \
             "${candidate_dir}/${checksums_name}.asc" \
             "${candidate_dir}/${checksums_name}"

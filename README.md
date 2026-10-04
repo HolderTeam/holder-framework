@@ -29,7 +29,7 @@ OpenPGP-signed candidate with checksums, provenance, and a GitHub artifact
 attestation; it does not publish a GitHub release.
 
 The protected-environment setup and verification process are documented in
-[`docs/linux-appimage-signing.md`](docs/linux-appimage-signing.md).
+[`release/docs/linux-appimage-signing.md`](release/docs/linux-appimage-signing.md).
 
 After signing, `Promote Linux AppImage to release` verifies one exact signing
 run and adds the AppImage, checksum manifest, manifest signature, and public
