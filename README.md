@@ -1,30 +1,25 @@
-# Holder Releases
+# Holder Framework
 
-Publishes Holder release assets for distribution.
+Build staging, release signing and release publishing for Holder.
 
-## Note
+## Layout
 
-This repository contains the release and distribution machinery for Holder. It is not the Holder source-code repository.
+- `staging/` - assembles and checks per-platform build artifacts from the component repositories (workflows: `staging-*-stage.yml`).
+- `release/` - signing keys, scripts and documentation for release signing and promotion (workflows: `sign-*` and `promote-*`).
+- `.github/workflows/` - all workflows live here, as GitHub requires.
 
-Holder is split across several repositories:
-
-holder-daemon - backend, CLI and core functionality
-holder-desktop - GTK desktop application
-holder-launcher - launcher
-holder-staging - build artifact staging
-
-See the HolderTeam GitHub organisation for the complete source.
+This repository is not the Holder source-code repository. The source is split across other repositories, such as holder-daemon (backend, CLI and core functionality), holder-desktop (GTK desktop application) and holder-launcher (launcher). See the HolderTeam GitHub organisation for the complete source.
 
 ## Windows development builds
 
-The `Promote Windows dev build` workflow can publish a self-signed Windows tester installer from a successful `HolderTeam/holder-staging` Windows staging run.
+The `Promote Windows dev build` workflow can publish a self-signed Windows tester installer from a successful Windows staging run of this repository.
 
 This is for prerelease testing only. It does not replace the final Windows signing path.
 
 ## Linux AppImage release candidates
 
 The `Sign Linux AppImage release candidate` workflow verifies and signs one exact
-successful `HolderTeam/holder-staging` AppImage run. It emits a tested,
+successful AppImage staging run of this repository. It emits a tested,
 OpenPGP-signed candidate with checksums, provenance, and a GitHub artifact
 attestation; it does not publish a GitHub release.
 

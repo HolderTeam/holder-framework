@@ -44,7 +44,7 @@ on:
         default: ""
         type: string
       appimage_version:
-        description: Optional product version; blank uses holder-staging/VERSION
+        description: Optional product version; blank uses staging/VERSION
         required: false
         default: ""
         type: string
@@ -58,13 +58,13 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Check out holder-staging
+      - name: Check out holder-framework
         uses: actions/checkout@v4
         with:
-          path: sources/holder-staging
+          path: sources/holder-framework
 
       - name: Test core provenance validation
-        run: python3 -m unittest discover -s sources/holder-staging/tests -v
+        run: python3 -m unittest discover -s sources/holder-framework/staging/tests -v
 
       - name: Select development inputs or release pins
         id: pins
@@ -79,9 +79,9 @@ jobs:
         run: |
           options=()
           if [[ -n "$RELEASE_MANIFEST" ]]; then
-            options=(--release-manifest "sources/holder-staging/$RELEASE_MANIFEST")
+            options=(--release-manifest "sources/holder-framework/staging/$RELEASE_MANIFEST")
           fi
-          python3 sources/holder-staging/scripts/core-provenance.py prepare "${options[@]}"
+          python3 sources/holder-framework/staging/scripts/core-provenance.py prepare "${options[@]}"
 
       - name: Resolve core SDK once
         id: core
@@ -298,9 +298,9 @@ jobs:
         run: |
           options=()
           if [[ -n "$RELEASE_MANIFEST" ]]; then
-            options=(--release-manifest "sources/holder-staging/$RELEASE_MANIFEST")
+            options=(--release-manifest "sources/holder-framework/staging/$RELEASE_MANIFEST")
           fi
-          python3 sources/holder-staging/scripts/core-provenance.py verify \
+          python3 sources/holder-framework/staging/scripts/core-provenance.py verify \
             --selection out/core-selection.json \
             --desktop-root work/desktop-root --backend-root work/backend-root \
             --build-type "${{ steps.pins.outputs.build_type }}" \
@@ -323,7 +323,7 @@ jobs:
           backend_api_version="$(cat "${backend_root}/release/holder-daemon-api-version.txt")"
           desktop_api_minimum="$(jq -er '.daemon_api.minimum' "${compatibility_file}")"
           desktop_api_maximum="$(jq -er '.daemon_api.maximum_exclusive' "${compatibility_file}")"
-          appimage_version="${APPIMAGE_VERSION_INPUT:-$(tr -d '[:space:]' < sources/holder-staging/VERSION)}"
+          appimage_version="${APPIMAGE_VERSION_INPUT:-$(tr -d '[:space:]' < sources/holder-framework/staging/VERSION)}"
 
           semver_pattern='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
           api_pattern='^[0-9]+\.[0-9]+$'
@@ -389,7 +389,7 @@ jobs:
 
           appdir="${PWD}/out/Holder.AppDir"
           install -d "${appdir}"
-          bash sources/holder-staging/scripts/linux-appimage/assemble-appdir.sh \
+          bash sources/holder-framework/staging/scripts/linux-appimage/assemble-appdir.sh \
             work/desktop-root \
             work/backend-root \
             "${appdir}" \
@@ -427,7 +427,7 @@ jobs:
 
           cp out/core-provenance.json "${appdir}/usr/share/holder/release/holder-core-provenance.json"
           if [[ -n "$RELEASE_MANIFEST" ]]; then
-            cp "sources/holder-staging/$RELEASE_MANIFEST" \
+            cp "sources/holder-framework/staging/$RELEASE_MANIFEST" \
               "${appdir}/usr/share/holder/release/holder-framework-release.json"
           fi
 
@@ -572,7 +572,7 @@ jobs:
           cmp out/core-provenance.json \
             "$extract_dir/squashfs-root/usr/share/holder/release/holder-core-provenance.json"
           if [[ -n "$RELEASE_MANIFEST" ]]; then
-            cmp "sources/holder-staging/$RELEASE_MANIFEST" \
+            cmp "sources/holder-framework/staging/$RELEASE_MANIFEST" \
               "$extract_dir/squashfs-root/usr/share/holder/release/holder-framework-release.json"
           fi
 
