@@ -67,7 +67,7 @@ jobs:
 
     steps:
       - name: Check out holder-framework
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: sources/holder-framework
 
@@ -117,7 +117,7 @@ jobs:
         run: python3 sources/holder-framework/staging/scripts/resolve-component-runs.py --platform windows --build-type "${{ steps.pins.outputs.build_type }}"
 
       - name: Check out holder-desktop metadata
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: ${{ steps.pins.outputs.desktop_repository }}
           ref: ${{ steps.artifact_runs.outputs.desktop_commit }}
@@ -125,7 +125,7 @@ jobs:
           path: sources/holder-desktop
 
       - name: Download desktop artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: holder-desktop-windows${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
           path: downloads/desktop
@@ -134,7 +134,7 @@ jobs:
           run-id: ${{ steps.artifact_runs.outputs.desktop_run_id }}
 
       - name: Download backend artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: holder-daemon-windows-backend${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
           path: downloads/backend
@@ -143,7 +143,7 @@ jobs:
           run-id: ${{ steps.artifact_runs.outputs.backend_run_id }}
 
       - name: Download launcher artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: holder-launcher-windows${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
           path: downloads/launcher
@@ -663,7 +663,7 @@ jobs:
           }
 
       - name: Upload unsigned staged package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Holder-windows-staged
           path: out/artifacts/Holder-windows-staged/**
@@ -672,7 +672,7 @@ jobs:
 
       - name: Upload self-signed tester installer
         if: inputs.sign_test_installer
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Holder-windows-test-signed-installer
           path: |

@@ -59,7 +59,7 @@ jobs:
 
     steps:
       - name: Check out holder-framework
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           path: sources/holder-framework
 
@@ -198,7 +198,7 @@ jobs:
           } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Download desktop artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: holder-desktop-linux-x86_64${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
           path: downloads/desktop
@@ -207,7 +207,7 @@ jobs:
           run-id: ${{ steps.artifact_runs.outputs.desktop_run_id }}
 
       - name: Download backend artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: holder-daemon-linux-x86_64${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
           path: downloads/backend
@@ -577,7 +577,7 @@ jobs:
           fi
 
       - name: Upload staged Linux package
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: Holder-linux-appimage-staged
           path: out/artifacts/*
