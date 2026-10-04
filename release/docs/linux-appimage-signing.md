@@ -42,7 +42,7 @@ Create an environment named exactly `linux-release-signing` in
 - Environment secret `HOLDER_GPG_SIGNING_PASSPHRASE`: the key passphrase.
 
 The expected public identity is anchored by
-`keys/holder-linux-release.asc` in this repository. Its primary fingerprint is
+`release/keys/holder-linux-release.asc` in this repository. Its primary fingerprint is
 `E60EEFC6E1CCB99988DA2E274B0C85A5A86B24A2`; the workflow derives and checks the
 fingerprint from that reviewed file rather than trusting a mutable GitHub
 variable.
