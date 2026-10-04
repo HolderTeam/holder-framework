@@ -46,7 +46,7 @@ Environment:
   HOLDER_CORE_REF              Resolve this tag/SHA instead of reusing the cached selection
   HOLDER_CORE_SDK_TOOL         Override the shared SDK selection tool
   HOLDER_USE_SYSTEM_CORE       1/ON to use the installed system core package
-  HOLDER_CORE_SOURCE_DIR       Source override (Fedora defaults to ../holder-core)
+  HOLDER_CORE_SOURCE_DIR       Source override (Fedora defaults to ../../holder-core)
   HOLDER_CTEST_TIMEOUT          Per-test timeout (memcheck defaults to 900 seconds)
   HOLDER_SAN_BUILD_DIR          Override the sanitizer build directory
   HOLDER_TSAN_SUPPRESSIONS      Optional explicit ThreadSanitizer suppression file
@@ -116,8 +116,8 @@ core_sdk_tool() {
     printf '%s\n' "$HOLDER_CORE_SDK_TOOL"
     return
   fi
-  if [ -f ../holder-core/scripts/core-sdk.py ]; then
-    printf '%s\n' ../holder-core/scripts/core-sdk.py
+  if [ -f ../../holder-core/scripts/core-sdk.py ]; then
+    printf '%s\n' ../../holder-core/scripts/core-sdk.py
     return
   fi
   local tools_dir=".core-sdk/tools/${CORE_SDK_TOOLS_REF}" file
@@ -148,12 +148,12 @@ fedora_source_default() {
 prepare_core() {
   local build_type="$1" tool python_bin selection="out/core-selection.json"
   if fedora_source_default; then
-    if [ ! -f ../holder-core/CMakeLists.txt ]; then
-      echo "Fedora requires a native core build; clone holder-core beside holder-daemon." >&2
+    if [ ! -f ../../holder-core/CMakeLists.txt ]; then
+      echo "Fedora requires a native core build; clone holder-core beside holder-framework." >&2
       echo "Alternatively set HOLDER_CORE_SOURCE_DIR or HOLDER_CORE_SDK to a native build." >&2
       return 1
     fi
-    HOLDER_CORE_SOURCE_DIR="$(cd ../holder-core && pwd)"
+    HOLDER_CORE_SOURCE_DIR="$(cd ../../holder-core && pwd)"
     export HOLDER_CORE_SOURCE_DIR
     echo "core: Fedora default uses the sibling checkout (native dependency ABI)"
   fi

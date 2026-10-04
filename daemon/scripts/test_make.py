@@ -60,8 +60,8 @@ class MakeTest(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix="holder make test ")
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name).resolve()
-        self.repo = self.root / "daemon"
-        self.repo.mkdir()
+        self.repo = self.root / "holder-framework" / "daemon"
+        self.repo.mkdir(parents=True)
         shutil.copy2(REPOSITORY / "make.sh", self.repo / "make.sh")
         # macOS has no /etc/os-release. Use a fixture in the copied wrapper
         # so distro detection tests never depend on the host's distro file.
@@ -161,7 +161,7 @@ class MakeTest(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("HOLDER_CORE_SOURCE_DIR", result.stderr)
         self.assertEqual(self.calls(), [])
-        self.require_success(self.run_make("test", "Debug", HOLDER_CORE_SOURCE_DIR="../holder-core"))
+        self.require_success(self.run_make("test", "Debug", HOLDER_CORE_SOURCE_DIR="../../holder-core"))
         self.assertIn("-DCMAKE_BUILD_TYPE=Debug", self.configure_call())
 
     def test_diagnostic_commands_use_supported_sdk_configuration(self):
@@ -222,7 +222,7 @@ class MakeTest(unittest.TestCase):
         shutil.rmtree(self.tool.parent.parent)
         result = self.run_make("build", MAKE_TEST_FEDORA="1")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("clone holder-core beside holder-daemon", result.stderr)
+        self.assertIn("clone holder-core beside holder-framework", result.stderr)
         self.assertEqual(self.calls(), [])
 
     def test_help_does_not_prepare_dependencies(self):

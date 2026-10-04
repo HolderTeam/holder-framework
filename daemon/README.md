@@ -38,7 +38,7 @@ Coverage tooling (optional):
 `./make.sh` builds, runs the tests, then starts `holderd`.
 It downloads core on the first build and reuses it afterwards.
 Run `./make.sh core-update` to get a newer version. On Fedora, it builds
-`../holder-core` instead.
+`../../holder-core` instead.
 
 ```sh
 ./make.sh build               # Build without starting the daemon
@@ -91,8 +91,8 @@ sudo dnf install -y \
   'pkgconfig(libgit2)' md4c-devel catch-devel libsodium-devel libsecret-devel \
   clang18-tools-extra
 
-# If holder-core is not already checked out beside holder-daemon:
-git clone https://github.com/HolderTeam/holder-core.git ../holder-core
+# If holder-core is not already checked out beside holder-framework:
+git clone https://github.com/HolderTeam/holder-core.git ../../holder-core
 ./make.sh
 ```
 
@@ -132,12 +132,12 @@ the documented internal-lock case in holder-core, rerun with its explicit suppre
 
 ```sh
 HOLDER_SAN_BUILD_DIR=build-tsan \
-  HOLDER_TSAN_SUPPRESSIONS="$PWD/../holder-core/tools/tsan/glibc.supp" \
+  HOLDER_TSAN_SUPPRESSIONS="$PWD/../../holder-core/tools/tsan/glibc.supp" \
   HOLDER_CTEST_TIMEOUT=900 ./make.sh san thread
 ```
 
 This suppression is opt-in and does not cover Holder code. See the rationale and
-source references in [glibc.supp](../holder-core/tools/tsan/glibc.supp).
+source references in [glibc.supp](../../holder-core/tools/tsan/glibc.supp).
 
 ## Quick Start (FreeBSD)
 

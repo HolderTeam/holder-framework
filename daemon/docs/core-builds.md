@@ -6,7 +6,7 @@
 version. `./make.sh core-update` updates it. The version is saved in
 `out/core-selection.json`; downloads are cached in `.core-sdk`.
 
-On Fedora, it builds `../holder-core` instead. The Linux SDK is built for
+On Fedora, it builds `../../holder-core` instead. The Linux SDK is built for
 Ubuntu 24.04 and uses different library versions from Fedora.
 
 ```sh
@@ -28,11 +28,11 @@ Set one of these before running `./make.sh`:
 These settings override the default. For example:
 
 ```sh
-HOLDER_CORE_SOURCE_DIR="$PWD/../holder-core" ./make.sh test Debug
+HOLDER_CORE_SOURCE_DIR="$PWD/../../holder-core" ./make.sh test Debug
 ```
 
 Direct CMake builds use `-DHOLDER_CORE_SOURCE_DIR=<source-path>`.
-The Windows Debug presets use `../holder-core`.
+The Windows Debug presets use `../../holder-core`.
 
 Published SDKs support `RelWithDebInfo` and `Release`. Diagnostic commands use
 `RelWithDebInfo` with an SDK and `Debug` with source builds. Other build types

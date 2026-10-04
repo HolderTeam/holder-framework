@@ -14,7 +14,7 @@ When changing an HTTP route, update and test `openapi.yaml` in the same change w
 
 # Core dependency selection
 
-Make holder-core changes in the standalone workspace repository at `../holder-core`
+Make holder-core changes in the standalone workspace repository at `../../holder-core`
 and test them there first. Do not edit embedded dependency copies inside holder-daemon.
 
 Normal development and GitHub CI consume the published core SDK via
@@ -24,14 +24,14 @@ to the daemon's. Use an explicit version tag or full SHA when a task requires a
 particular core change, then test daemon against that SDK. Ubuntu source packages
 use the packaged `libholder-dev` and `libholder0` through `HOLDER_USE_SYSTEM_CORE`.
 
-On Fedora, `./make.sh` defaults to the standalone `../holder-core` source checkout
+On Fedora, `./make.sh` defaults to the standalone `../../holder-core` source checkout
 because the canonical Ubuntu Linux SDK has incompatible dependency ABIs. This is
 an intentional platform default, not a fallback after an SDK failure. Explicit
 SDK, source and system-package selections take precedence. If the sibling core
 checkout is missing, report how to provide it rather than fetching the Ubuntu SDK.
 
 For explicit local source development elsewhere, use `HOLDER_CORE_SOURCE_DIR`
-pointing at the standalone `../holder-core` checkout. Outside the Fedora wrapper
+pointing at the standalone `../../holder-core` checkout. Outside the Fedora wrapper
 default, source builds are opt-in; do not silently fall back to compiling core
 when an SDK is missing. Core owns its tests and
 sanitizer coverage; daemon owns its HTTP and integration tests.
