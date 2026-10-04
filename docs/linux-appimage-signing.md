@@ -6,7 +6,7 @@ candidate. It deliberately does not create or update a GitHub release.
 
 ## Trust boundary
 
-The workflow lives in `holder-release` so ordinary changes to Holder's source,
+The workflow lives in `holder-framework` so ordinary changes to Holder's source,
 build, and staging repositories cannot also change the signing policy. Configure
 the fixed `linux-release-signing` GitHub environment with required reviewers;
 the signing job cannot read that environment's secrets until a reviewer approves
@@ -35,7 +35,7 @@ change.
 ## Required GitHub configuration
 
 Create an environment named exactly `linux-release-signing` in
-`HolderTeam/holder-release` and add:
+`HolderTeam/holder-framework` and add:
 
 - Environment secret `HOLDER_GPG_SIGNING_KEY_B64`: a base64 encoding of the
   exported private signing subkeys.
@@ -85,7 +85,7 @@ gpg --import Holder-linux-release-key.asc
 gpg --verify Holder-<version>-SHA256SUMS.asc Holder-<version>-SHA256SUMS
 sha256sum -c Holder-<version>-SHA256SUMS
 gh attestation verify Holder-<version>-x86_64.AppImage \
-  --repo HolderTeam/holder-release
+  --repo HolderTeam/holder-framework
 ```
 
 The detached manifest signature is the straightforward end-user verification

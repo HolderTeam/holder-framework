@@ -8,7 +8,7 @@ on:
         required: true
         type: string
       signing_run_id:
-        description: Successful holder-release signing workflow run ID
+        description: Successful holder-framework signing workflow run ID
         required: true
         type: string
       release_tag:
@@ -171,7 +171,7 @@ jobs:
           if ! cmp -s \
             keys/holder-linux-release.asc \
             "${candidate_dir}/${public_key_name}"; then
-            echo "Candidate public key differs from holder-release policy." >&2
+            echo "Candidate public key differs from holder-framework policy." >&2
             exit 1
           fi
 

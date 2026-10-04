@@ -65,7 +65,7 @@ chmod 0700 "${validation_gnupg_home}"
 
 export GNUPGHOME="${validation_gnupg_home}"
 if ! cmp -s "${expected_public_key}" "${candidate_dir}/${public_key_name}"; then
-  echo "Candidate public key differs from the public key committed to holder-release." >&2
+  echo "Candidate public key differs from the public key committed to holder-framework." >&2
   exit 1
 fi
 
