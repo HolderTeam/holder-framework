@@ -52,7 +52,7 @@ on:
         description: Repository containing the launcher artifact
         required: true
         type: string
-        default: HolderTeam/holder-launcher
+        default: HolderTeam/holder-framework
 
 permissions:
   actions: read

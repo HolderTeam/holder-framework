@@ -30,12 +30,12 @@ its component inputs remain subject to Actions artifact retention.
     "windows": {
       "desktop": {"repository": "HolderTeam/holder-desktop", "run_id": "<Windows desktop run>", "commit": "<desktop SHA>"},
       "backend": {"repository": "HolderTeam/holder-daemon", "run_id": "<daemon Release run>", "commit": "<daemon SHA>"},
-      "launcher": {"repository": "HolderTeam/holder-launcher", "run_id": "<Windows launcher run>", "commit": "<launcher SHA>"}
+      "launcher": {"repository": "HolderTeam/holder-framework", "run_id": "<Windows launcher run>", "commit": "<launcher SHA>"}
     },
     "macos": {
       "desktop": {"repository": "HolderTeam/holder-desktop", "run_id": "<macOS desktop run>", "commit": "<desktop SHA>"},
       "backend": {"repository": "HolderTeam/holder-daemon", "run_id": "<daemon Release run>", "commit": "<daemon SHA>"},
-      "launcher": {"repository": "HolderTeam/holder-launcher", "run_id": "<macOS launcher run>", "commit": "<launcher SHA>"}
+      "launcher": {"repository": "HolderTeam/holder-framework", "run_id": "<macOS launcher run>", "commit": "<launcher SHA>"}
     }
   }
 }
