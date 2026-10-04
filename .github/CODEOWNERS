@@ -1,0 +1,6 @@
+# Release signing and promotion. These paths handle signing material and
+# publishing, so changes to them should always have an explicit owner.
+/release/                               @zeth
+/.github/workflows/sign-*.yml           @zeth
+/.github/workflows/promote-*.yml        @zeth
+/.github/CODEOWNERS                     @zeth
