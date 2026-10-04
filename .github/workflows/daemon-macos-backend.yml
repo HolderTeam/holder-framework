@@ -22,15 +22,16 @@ jobs:
     runs-on: macos-15
 
     steps:
-      - name: Check out holder-daemon
+      - name: Check out holder-framework
         uses: actions/checkout@v4
         with:
-          repository: HolderTeam/holder-daemon
+          repository: HolderTeam/holder-framework
           ref: ${{ inputs.daemon_commit }}
           persist-credentials: false
 
       - name: Prepare caste source dependency
         shell: bash
+        working-directory: daemon
         run: git submodule update --init --recursive -- submodules/caste
 
       - uses: HolderTeam/holder-core/.github/actions/core-sdk@main
@@ -39,6 +40,7 @@ jobs:
           build-type: ${{ inputs.build_type }}
 
       - name: Install dependencies
+        working-directory: daemon
         run: |
           set -euo pipefail
 
@@ -59,6 +61,7 @@ jobs:
             openssl@3
 
       - name: Configure CMake
+        working-directory: daemon
         run: |
           brew_prefix="$(brew --prefix)"
           openssl_prefix="$(brew --prefix openssl@3)"
@@ -73,12 +76,15 @@ jobs:
             -DBUILD_TESTING=ON
 
       - name: Build backend executables and tests
+        working-directory: daemon
         run: cmake --build build-macos --parallel
 
       - name: Run tests
+        working-directory: daemon
         run: ctest --test-dir build-macos --output-on-failure
 
       - name: Stage backend artifact
+        working-directory: daemon
         run: |
           set -euo pipefail
 
@@ -111,6 +117,7 @@ jobs:
           find "${stage_dir}" -type f | sort
 
       - name: Smoke-test staged executables
+        working-directory: daemon
         run: |
           set -euo pipefail
 
@@ -123,6 +130,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: holder-daemon-macos-backend${{ inputs.build_type == 'Release' && '-release' || '' }}
-          path: out/artifacts/macos-backend/**
+          path: daemon/out/artifacts/macos-backend/**
           if-no-files-found: error
           retention-days: 7

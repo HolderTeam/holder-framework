@@ -2,8 +2,16 @@ name: Daemon SDK integration
 
 on:
   pull_request:
+    paths:
+      - 'daemon/**'
+      - '.gitmodules'
+      - '.github/workflows/daemon-*.yml'
   push:
     branches: [main]
+    paths:
+      - 'daemon/**'
+      - '.gitmodules'
+      - '.github/workflows/daemon-*.yml'
   workflow_dispatch:
     inputs:
       core_ref:
@@ -41,8 +49,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: HolderTeam/holder-daemon
-          ref: ${{ github.repository == 'HolderTeam/holder-daemon' && github.sha || inputs.daemon_ref || 'main' }}
+          repository: HolderTeam/holder-framework
+          ref: ${{ github.repository == 'HolderTeam/holder-framework' && github.sha || inputs.daemon_ref || 'main' }}
           persist-credentials: false
       - name: Validate SDK configuration
         env:
@@ -62,27 +70,27 @@ jobs:
           core-ref: ${{ inputs.core_ref || 'latest-green' }}
   linux:
     needs: resolve
-    uses: ./.github/workflows/linux-backend.yml
+    uses: ./.github/workflows/daemon-linux-backend.yml
     with:
       core_commit: ${{ needs.resolve.outputs.core_commit }}
       daemon_commit: ${{ needs.resolve.outputs.daemon_commit }}
       build_type: ${{ inputs.core_build_type || 'RelWithDebInfo' }}
   macos:
     needs: resolve
-    uses: ./.github/workflows/macos-backend.yml
+    uses: ./.github/workflows/daemon-macos-backend.yml
     with:
       core_commit: ${{ needs.resolve.outputs.core_commit }}
       daemon_commit: ${{ needs.resolve.outputs.daemon_commit }}
       build_type: ${{ inputs.core_build_type || 'RelWithDebInfo' }}
   windows:
     needs: resolve
-    uses: ./.github/workflows/windows-backend.yml
+    uses: ./.github/workflows/daemon-windows-backend.yml
     with:
       core_commit: ${{ needs.resolve.outputs.core_commit }}
       daemon_commit: ${{ needs.resolve.outputs.daemon_commit }}
       build_type: ${{ inputs.core_build_type || 'RelWithDebInfo' }}
   ubuntu-packages:
-    if: github.repository == 'HolderTeam/holder-daemon' && inputs.core_build_type != 'Release'
+    if: github.repository == 'HolderTeam/holder-framework' && inputs.core_build_type != 'Release'
     needs: resolve
     strategy:
       fail-fast: false
@@ -106,18 +114,20 @@ jobs:
           apt-get update
       - uses: actions/checkout@v4
         with:
-          repository: HolderTeam/holder-daemon
+          repository: HolderTeam/holder-framework
           ref: ${{ needs.resolve.outputs.daemon_commit }}
           persist-credentials: false
       - name: Build daemon with distribution core packages
         env:
           DEBIAN_FRONTEND: noninteractive
+        working-directory: daemon
         run: |
           cp -a packaging/linux/debian debian
           mk-build-deps --install --remove --tool 'apt-get -y --no-install-recommends' debian/control
           dpkg-buildpackage -b -us -uc -j2
       - name: Verify shared core linkage and package dependency
         shell: bash
+        working-directory: daemon
         run: |
           ldd build/holderd | grep 'libholder.so.0'
           ldd build/holderctl | grep 'libholder.so.0'
@@ -132,5 +142,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: holder-daemon-${{ matrix.series }}-packages
-          path: out/ubuntu-packages/*.deb
+          path: daemon/out/ubuntu-packages/*.deb
           if-no-files-found: error

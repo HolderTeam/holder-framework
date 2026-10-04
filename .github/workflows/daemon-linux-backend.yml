@@ -22,15 +22,16 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
-      - name: Check out holder-daemon
+      - name: Check out holder-framework
         uses: actions/checkout@v4
         with:
-          repository: HolderTeam/holder-daemon
+          repository: HolderTeam/holder-framework
           ref: ${{ inputs.daemon_commit }}
           persist-credentials: false
 
       - name: Prepare caste source dependency
         shell: bash
+        working-directory: daemon
         run: git submodule update --init --recursive -- submodules/caste
 
       - uses: HolderTeam/holder-core/.github/actions/core-sdk@main
@@ -39,6 +40,7 @@ jobs:
           build-type: ${{ inputs.build_type }}
 
       - name: Install dependencies
+        working-directory: daemon
         run: |
           set -euo pipefail
 
@@ -60,6 +62,7 @@ jobs:
             libsecret-1-dev
 
       - name: Configure CMake
+        working-directory: daemon
         run: |
           cmake \
             -S . \
@@ -70,6 +73,7 @@ jobs:
             -DBUILD_TESTING=ON
 
       - name: Build backend executables and tests
+        working-directory: daemon
         run: |
           # Core is prebuilt; this builds daemon executables and integration tests.
           cmake \
@@ -77,6 +81,7 @@ jobs:
             --parallel
 
       - name: Run tests
+        working-directory: daemon
         run: |
           ctest \
             --test-dir build-linux \
@@ -85,6 +90,7 @@ jobs:
             --timeout 60
 
       - name: Stage installed backend
+        working-directory: daemon
         run: |
           set -euo pipefail
 
@@ -122,6 +128,7 @@ jobs:
           find "${stage_dir}" -type f | sort
 
       - name: Smoke-test staged backend
+        working-directory: daemon
         run: |
           set -euo pipefail
 
@@ -197,6 +204,7 @@ jobs:
           trap - EXIT
 
       - name: Archive backend artifact
+        working-directory: daemon
         run: |
           set -euo pipefail
 
@@ -215,6 +223,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: holder-daemon-linux-x86_64${{ inputs.build_type == 'Release' && '-release' || '' }}
-          path: out/artifacts/linux-backend-upload/*
+          path: daemon/out/artifacts/linux-backend-upload/*
           if-no-files-found: error
           retention-days: 7

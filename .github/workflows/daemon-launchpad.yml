@@ -30,9 +30,11 @@ jobs:
           persist-credentials: false
 
       - name: Test package install hook
+        working-directory: daemon
         run: python3 -B -m unittest tests/linux_postinst_test.py
 
       - name: Install Debian packaging tools
+        working-directory: daemon
         run: |
           sudo apt update
           sudo apt install -y \
@@ -45,6 +47,7 @@ jobs:
       - name: Import GPG key
         env:
           PPA_GPG_PRIVATE_KEY: ${{ secrets.PPA_GPG_PRIVATE_KEY }}
+        working-directory: daemon
         run: |
           mkdir -p ~/.gnupg
           chmod 700 ~/.gnupg
@@ -73,6 +76,7 @@ jobs:
           INPUT_VERSION: ${{ github.event.inputs.version }}
           PACKAGE_REVISION: ${{ github.event.inputs.package_revision || '1' }}
           EVENT_NAME: ${{ github.event_name }}
+        working-directory: daemon
         run: |
           rm -rf debian build
           cp -a packaging/linux/debian ./debian
@@ -113,9 +117,11 @@ jobs:
         env:
           DEBFULLNAME: "Holder Team"
           DEBEMAIL: "holdercardteam@gmail.com"
+        working-directory: daemon
         run: |
           debuild -S -d -k"$DEBSIGN_KEYID"
 
       - name: Upload to Launchpad PPA
+        working-directory: daemon
         run: |
           dput ppa:holderteam/holder ../*_source.changes
