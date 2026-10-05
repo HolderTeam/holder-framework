@@ -424,12 +424,21 @@ else()
   target_compile_definitions(holderd PRIVATE HOLDER_ENABLE_ENCRYPTED_GIT=0)
 endif()
 
+# GCC 12 and 13 report -Warray-bounds inside fmt v9's basic_memory_buffer growth code (reached
+# through spdlog) when optimising; it is a false positive in the library, and GCC 14 does not
+# report it. Only those compilers are told to skip the check, so newer GCC and Clang keep it.
+set(HOLDER_GCC_FMT_FALSE_POSITIVE "")
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14)
+  set(HOLDER_GCC_FMT_FALSE_POSITIVE -Wno-array-bounds)
+endif()
+
 # Warnings (GNU/Clang)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(holderd PRIVATE
     -Wall -Wextra -Wpedantic
     -Wshadow -Wconversion -Wsign-conversion
     -Wno-unknown-pragmas
+    ${HOLDER_GCC_FMT_FALSE_POSITIVE}
   )
   if(HOLDER_WARNINGS_AS_ERRORS)
     target_compile_options(holderd PRIVATE -Werror)
@@ -549,6 +558,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     -Wall -Wextra -Wpedantic
     -Wshadow -Wconversion -Wsign-conversion
     -Wno-unknown-pragmas
+    ${HOLDER_GCC_FMT_FALSE_POSITIVE}
   )
   if(HOLDER_WARNINGS_AS_ERRORS)
     target_compile_options(holderctl PRIVATE -Werror)
