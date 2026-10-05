@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cli/commands/Common.h"
+#include "commands/Common.h"
 
 #include <cstddef>
 #include <cstdint>

@@ -1,4 +1,4 @@
-#include "cli/commands/Common.h"
+#include "commands/Common.h"
 
 #include <boost/asio.hpp>
 #include <boost/beast/core.hpp>

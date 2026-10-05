@@ -1,4 +1,4 @@
-#include "cli/commands/Download.h"
+#include "commands/Download.h"
 
 #include "identity/Uuid.h"
 

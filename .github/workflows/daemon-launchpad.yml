@@ -70,6 +70,16 @@ jobs:
 
           gpgconf --kill gpg-agent
 
+      - name: Copy the holderctl and shared sources into daemon/
+        working-directory: daemon
+        run: |
+          # The source package is built from daemon/ alone, so it carries copies of the holderctl
+          # sources (cli/) and the platform files holderd and holderctl share (common/); the CMake
+          # build uses these when the directories beside daemon/ are out of reach.
+          rm -rf cli common
+          cp -a ../cli ./cli
+          cp -a ../common ./common
+
       - name: Prepare Debian directory
         env:
           SERIES: ${{ matrix.series }}

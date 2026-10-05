@@ -2,8 +2,8 @@
 #include "TestCommand.h"
 #include "http_test_helpers.h"
 
-#include "cli/commands/Common.h"
-#include "cli/commands/Ensure.h"
+#include "commands/Common.h"
+#include "commands/Ensure.h"
 
 #include <catch2/catch_test_macros.hpp>
 #include <nlohmann/json.hpp>

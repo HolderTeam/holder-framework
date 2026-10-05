@@ -1,7 +1,7 @@
-#include "cli/commands/Ensure.h"
+#include "commands/Ensure.h"
 
-#include "cli/commands/Commands.h"
-#include "cli/commands/Common.h"
+#include "commands/Commands.h"
+#include "commands/Common.h"
 #include "platform/DetachedProcess.h"
 
 #include <boost/beast/http.hpp>

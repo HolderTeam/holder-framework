@@ -129,8 +129,8 @@ add_executable(holder_daemon_tests
   ../src/platform/LockFile.cpp
   ../src/app/Entrypoint.cpp
   ../src/app/FatalError.cpp
-  ../src/platform/BaseDir.cpp
-  ../src/platform/Paths.cpp
+  ${HOLDER_COMMON_DIR}/src/platform/BaseDir.cpp
+  ${HOLDER_COMMON_DIR}/src/platform/Paths.cpp
   ../src/platform/DatabaseRecovery.cpp
   ../src/platform/DeviceConfigStore.cpp
   ../src/platform/ProjectRegistry.cpp
@@ -210,14 +210,16 @@ add_executable(holder_daemon_tests
   ../src/storage/google/GoogleNetwork.cpp
   ../src/storage/google/GoogleDriveProvider.cpp
   ../src/app/Bootstrap.cpp
-  ../src/cli/commands/MilestoneDateTime.cpp
-  ../src/cli/commands/Common.cpp
-  ../src/cli/commands/Download.cpp
-  ../src/cli/commands/Ensure.cpp
-  ../src/platform/DetachedProcess.cpp
+  ${HOLDER_CLI_DIR}/src/commands/MilestoneDateTime.cpp
+  ${HOLDER_CLI_DIR}/src/commands/Common.cpp
+  ${HOLDER_CLI_DIR}/src/commands/Download.cpp
+  ${HOLDER_CLI_DIR}/src/commands/Ensure.cpp
+  ${HOLDER_COMMON_DIR}/src/platform/DetachedProcess.cpp
 )
 target_include_directories(holder_daemon_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../src
+  ${HOLDER_CLI_DIR}/src
+  ${HOLDER_COMMON_DIR}/src
 )
 if(MSVC)
   target_compile_options(holder_daemon_tests PRIVATE "/FI${CMAKE_CURRENT_SOURCE_DIR}/WinEnvCompat.h")
