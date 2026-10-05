@@ -1,6 +1,15 @@
 cmake_minimum_required(VERSION 3.22)
 
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" HOLDER_DAEMON_VERSION)
+# The whole framework has one version, in VERSION at the repository root. A source tree exported
+# from daemon/ alone (the Debian source package) cannot see the root, so it carries a copy beside
+# this file instead; the root file wins when both exist.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION")
+  set(HOLDER_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION")
+else()
+  set(HOLDER_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+endif()
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HOLDER_VERSION_FILE}")
+file(READ "${HOLDER_VERSION_FILE}" HOLDER_DAEMON_VERSION)
 string(STRIP "${HOLDER_DAEMON_VERSION}" HOLDER_DAEMON_VERSION)
 if(HOLDER_DAEMON_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)(-[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?(\\+[0-9A-Za-z-]+(\\.[0-9A-Za-z-]+)*)?$")
   # CMake's project(VERSION) accepts only numeric components. Keep the full
@@ -10,7 +19,7 @@ if(HOLDER_DAEMON_VERSION MATCHES "^([0-9]+)\\.([0-9]+)\\.([0-9]+)(-[0-9A-Za-z-]+
       "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}")
 else()
   message(FATAL_ERROR
-    "VERSION must contain a semantic version like 0.1.0 or 2.0.0-dev")
+    "${HOLDER_VERSION_FILE} must contain a semantic version like 0.1.0 or 2.0.0-dev")
 endif()
 
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/API_VERSION" HOLDER_DAEMON_API_VERSION)

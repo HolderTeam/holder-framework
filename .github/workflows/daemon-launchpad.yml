@@ -81,6 +81,9 @@ jobs:
           rm -rf debian build
           cp -a packaging/linux/debian ./debian
 
+          # The source package is built from daemon/ alone, so it carries a copy of the framework's
+          # root VERSION, which the CMake build reads when the root is out of reach.
+          cp ../VERSION VERSION
           VERSION="$(tr -d '[:space:]' < VERSION)"
           if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "VERSION must contain a semantic version like 0.1.0; got '$VERSION'" >&2

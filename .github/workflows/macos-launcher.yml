@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - 'launcher/**'
+      - 'VERSION'
       - '.github/workflows/macos-launcher.yml'
   push:
     branches:
       - main
     paths:
       - 'launcher/**'
+      - 'VERSION'
       - '.github/workflows/macos-launcher.yml'
   workflow_dispatch:
     inputs:
