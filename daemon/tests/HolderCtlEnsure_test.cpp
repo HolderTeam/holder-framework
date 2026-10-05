@@ -43,7 +43,9 @@ TEST_CASE("ensure parses dotted API versions", "[ensure]") {
   REQUIRE(parse_api_version("1") == std::optional<std::vector<unsigned long>>({1}));
   REQUIRE(parse_api_version("12.0.345") == std::optional<std::vector<unsigned long>>({12, 0, 345}));
 
-  for (const char* bad : {"", ".", "1.", ".1", "1..2", "a", "1.x", "1.2-rc.1", "v1", " 1", "1 ", "-1", "1234567890"}) {
+  for (const char* bad :
+       {"", ".", "1.", ".1", "1..2", "a", "1.x", "1.2-rc.1", "v1", " 1", "1 ", "-1", "1234567890"
+       }) {
     INFO("input: '" << bad << "'");
     REQUIRE_FALSE(parse_api_version(bad).has_value());
   }
@@ -110,7 +112,8 @@ holder::cli::EnsureOptions parse(std::vector<std::string> args) {
   std::vector<std::string> storage = {"holderctl", "ensure"};
   storage.insert(storage.end(), args.begin(), args.end());
   std::vector<char*> argv;
-  for (auto& item : storage) argv.push_back(item.data());
+  for (auto& item : storage)
+    argv.push_back(item.data());
   return holder::cli::parse_ensure_options(static_cast<int>(argv.size()), argv.data());
 }
 
@@ -139,16 +142,22 @@ TEST_CASE("ensure parses its options", "[ensure]") {
   SECTION("every option, in both spellings") {
     const auto options = parse({
         "--json",
-        "--api-min", "0.1",
+        "--api-min",
+        "0.1",
         "--api-max-exclusive=2",
         "--no-start",
-        "--timeout", "2.5",
+        "--timeout",
+        "2.5",
         "--mode=spawn",
-        "--daemon", "/opt/holder/bin/holderd",
-        "--daemon-arg", "--port",
+        "--daemon",
+        "/opt/holder/bin/holderd",
+        "--daemon-arg",
+        "--port",
         "--daemon-arg=0",
-        "--idle-exit", "30",
-        "--workdir", "/opt/holder/share/holder-daemon",
+        "--idle-exit",
+        "30",
+        "--workdir",
+        "/opt/holder/share/holder-daemon",
     });
     REQUIRE_FALSE(options.allow_start);
     REQUIRE(options.api.minimum == "0.1");
@@ -184,7 +193,12 @@ TEST_CASE("ensure renders the documented JSON shape", "[ensure]") {
   started.ok = true;
   started.state = "started";
   started.mode = "spawned";
-  started.daemon = {{"pid", 42}, {"url", "http://127.0.0.1:1"}, {"api_version", "0.1"}, {"server_version", "0.2.1"}};
+  started.daemon = {
+      {"pid", 42},
+      {"url", "http://127.0.0.1:1"},
+      {"api_version", "0.1"},
+      {"server_version", "0.2.1"}
+  };
   started.spawned_pid = 42;
   started.idle_exit_seconds = 30;
   started.log_path = "/tmp/holderd-start.log";
@@ -238,16 +252,48 @@ TEST_CASE("ensure reports that nothing is running with --no-start", "[ensure][pr
 
 TEST_CASE("ensure reports a missing holderd", "[ensure][process]") {
   IsolatedHome home;
-  const auto run = home.run("--daemon \"" + (std::filesystem::temp_directory_path() / "no-such-holderd").string() + "\"");
+  const auto run = home.run(
+      "--daemon \"" + (std::filesystem::temp_directory_path() / "no-such-holderd").string() + "\""
+  );
   REQUIRE(run.exit_code == holder::cli::kEnsureExitDaemonNotFound);
   REQUIRE(run.json["error"]["code"] == "daemon_not_found");
+}
+
+TEST_CASE("ensure says why a holderd could not be started", "[ensure][process]") {
+  IsolatedHome home;
+
+  SECTION("the working directory does not exist") {
+    const auto run = home.run(
+        "--daemon /bin/sleep --workdir \"" + (home.root() / "no-such-dir").string() +
+        "\" --timeout 5"
+    );
+    REQUIRE(run.exit_code == holder::cli::kEnsureExitStartFailed);
+    REQUIRE(run.json["error"]["code"] == "start_failed");
+    const auto message = run.json["error"]["message"].get<std::string>();
+    REQUIRE(message.find("working directory") != std::string::npos);
+    REQUIRE(message.find("no-such-dir") != std::string::npos);
+  }
+
+  SECTION("the program cannot be run") {
+    const auto program = home.root() / "not-a-program";
+    std::ofstream(program) << "not executable";
+    const auto run = home.run("--daemon \"" + program.string() + "\" --timeout 5");
+    REQUIRE(run.exit_code == holder::cli::kEnsureExitStartFailed);
+    REQUIRE(run.json["error"]["code"] == "start_failed");
+    REQUIRE(
+        run.json["error"]["message"].get<std::string>().find("Permission denied") !=
+        std::string::npos
+    );
+  }
 }
 
 TEST_CASE("ensure notices a daemon that exits before becoming healthy", "[ensure][process]") {
   IsolatedHome home;
   // holderctl itself stands in for a daemon that stops at once.
   const auto started = std::chrono::steady_clock::now();
-  const auto run = home.run("--daemon \"" + std::string(HOLDER_CTL_PATH) + "\" --daemon-arg version --timeout 30");
+  const auto run = home.run(
+      "--daemon \"" + std::string(HOLDER_CTL_PATH) + "\" --daemon-arg version --timeout 30"
+  );
   const auto elapsed = std::chrono::steady_clock::now() - started;
   REQUIRE(run.exit_code == holder::cli::kEnsureExitStartFailed);
   REQUIRE(run.json["error"]["code"] == "start_failed");
@@ -267,7 +313,10 @@ TEST_CASE("ensure times out on a daemon that never becomes healthy", "[ensure][p
   REQUIRE(process_alive(run.json["spawned_pid"].get<long long>()));
 }
 
-TEST_CASE("ensure starts a detached daemon, reuses it, and enforces the API range", "[ensure][process]") {
+TEST_CASE(
+    "ensure starts a detached daemon, reuses it, and enforces the API range",
+    "[ensure][process]"
+) {
   IsolatedHome home;
 
   const auto first = home.run(home.daemon_arguments());
@@ -354,7 +403,9 @@ TEST_CASE("ensure --idle-exit starts a daemon that stops by itself", "[ensure][p
 
   // It is still there shortly afterwards, then goes away without being asked.
   REQUIRE(process_alive(pid));
-  REQUIRE(holder::test::wait_until(std::chrono::seconds(30), [&]() { return !process_alive(pid); }));
+  REQUIRE(holder::test::wait_until(std::chrono::seconds(30), [&]() {
+    return !process_alive(pid);
+  }));
 
   // The next call finds nothing running and starts a fresh daemon.
   const auto again = home.run(home.daemon_arguments());

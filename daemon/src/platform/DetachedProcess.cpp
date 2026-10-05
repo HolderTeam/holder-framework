@@ -1,5 +1,11 @@
 #include "platform/DetachedProcess.h"
 
+#include <boost/asio/io_context.hpp>
+#include <boost/process/v2/process.hpp>
+#include <boost/process/v2/start_dir.hpp>
+#include <boost/process/v2/stdio.hpp>
+#include <boost/system/system_error.hpp>
+
 #include <cstdlib>
 #include <string>
 #include <system_error>
@@ -7,6 +13,7 @@
 #include <vector>
 
 #ifdef _WIN32
+#include <boost/process/v2/windows/creation_flags.hpp>
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -29,11 +36,14 @@
 
 namespace holder::platform {
 
-#ifdef _WIN32
+namespace bp = boost::process::v2;
 
+// The child is started through Boost.Process v2, which reports a failed start (a missing
+// program or start directory, a program that cannot be run) as an exception. Boost's own
+// destructor would terminate a child it still owns, so ours always lets go of it first.
 struct DetachedProcess::Impl {
-  HANDLE process = nullptr;
-  DWORD pid = 0;
+  boost::asio::io_context context;
+  std::optional<bp::process> process;
   bool exited = false;
   int exit_code = 0;
 
@@ -41,11 +51,23 @@ struct DetachedProcess::Impl {
   Impl(const Impl&) = delete;
   Impl& operator=(const Impl&) = delete;
   ~Impl() {
-    if (process != nullptr) CloseHandle(process);
+    if (process.has_value()) process->detach();
   }
 };
 
+#ifdef _WIN32
+
 namespace {
+
+std::wstring utf8_to_wide(const std::string& text) {
+  if (text.empty()) return {};
+  const int size =
+      MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+  if (size <= 0) return {};
+  std::wstring wide(static_cast<size_t>(size), L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), size);
+  return wide;
+}
 
 std::string windows_error_message(DWORD code) {
   char* buffer = nullptr;
@@ -70,74 +92,26 @@ std::string windows_error_message(DWORD code) {
   return text;
 }
 
-std::wstring utf8_to_wide(const std::string& text) {
-  if (text.empty()) return {};
-  const int size = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
-  if (size <= 0) return {};
-  std::wstring wide(static_cast<size_t>(size), L'\0');
-  MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), wide.data(), size);
-  return wide;
-}
-
-// Quotes one argument following the rules CommandLineToArgvW and the C runtime use.
-void append_argument(std::wstring& command, const std::wstring& arg) {
-  if (!command.empty()) command.push_back(L' ');
-  if (!arg.empty() && arg.find_first_of(L" \t\n\v\"") == std::wstring::npos) {
-    command += arg;
-    return;
-  }
-  command.push_back(L'"');
-  for (auto it = arg.begin();; ++it) {
-    size_t backslashes = 0;
-    while (it != arg.end() && *it == L'\\') {
-      ++it;
-      ++backslashes;
-    }
-    if (it == arg.end()) {
-      command.append(backslashes * 2, L'\\');
-      break;
-    }
-    if (*it == L'"') {
-      command.append(backslashes * 2 + 1, L'\\');
-      command.push_back(L'"');
-    } else {
-      command.append(backslashes, L'\\');
-      command.push_back(*it);
-    }
-  }
-  command.push_back(L'"');
-}
-
 class HandleGuard {
  public:
-  explicit HandleGuard(HANDLE handle = INVALID_HANDLE_VALUE) : handle_(handle) {}
-  HandleGuard(HandleGuard&& other) noexcept : handle_(other.release()) {}
-  HandleGuard& operator=(HandleGuard&& other) noexcept {
-    if (this != &other) {
-      reset();
-      handle_ = other.release();
-    }
-    return *this;
-  }
+  explicit HandleGuard(HANDLE handle = INVALID_HANDLE_VALUE)
+      : handle_(handle) {}
   HandleGuard(const HandleGuard&) = delete;
   HandleGuard& operator=(const HandleGuard&) = delete;
-  ~HandleGuard() { reset(); }
+  ~HandleGuard() {
+    if (valid()) CloseHandle(handle_);
+  }
 
   HANDLE get() const { return handle_; }
   bool valid() const { return handle_ != INVALID_HANDLE_VALUE && handle_ != nullptr; }
-  HANDLE release() {
-    const HANDLE handle = handle_;
-    handle_ = INVALID_HANDLE_VALUE;
-    return handle;
-  }
-  void reset() {
-    if (valid()) CloseHandle(handle_);
-    handle_ = INVALID_HANDLE_VALUE;
-  }
 
  private:
   HANDLE handle_;
 };
+
+// Detached from our console and in its own process group, so a Ctrl-C or the console closing
+// does not reach it, and no console window appears for it.
+constexpr DWORD kDetached = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
 
 } // namespace
 
@@ -150,33 +124,15 @@ std::optional<DetachedProcess> DetachedProcess::start(
     return std::nullopt;
   };
 
-  std::error_code ec;
-  if (!std::filesystem::is_regular_file(request.executable, ec)) {
-    return fail("cannot start " + request.executable.string() + ": no such program");
-  }
-
-  SECURITY_ATTRIBUTES inheritable{};
-  inheritable.nLength = sizeof(inheritable);
-  inheritable.bInheritHandle = TRUE;
-
-  HandleGuard null_handle(CreateFileW(
-      L"NUL",
-      GENERIC_READ | GENERIC_WRITE,
-      FILE_SHARE_READ | FILE_SHARE_WRITE,
-      &inheritable,
-      OPEN_EXISTING,
-      FILE_ATTRIBUTE_NORMAL,
-      nullptr
-  ));
-  if (!null_handle.valid()) {
-    return fail("cannot open NUL: " + windows_error_message(GetLastError()));
-  }
-
   // Standard output and error go to the log file when there is one, otherwise to NUL.
-  HandleGuard log_handle;
+  std::error_code ec;
+  std::optional<HandleGuard> opened;
   if (!request.log_path.empty()) {
     std::filesystem::create_directories(request.log_path.parent_path(), ec);
-    log_handle = HandleGuard(CreateFileW(
+    SECURITY_ATTRIBUTES inheritable{};
+    inheritable.nLength = sizeof(inheritable);
+    inheritable.bInheritHandle = TRUE;
+    opened.emplace(CreateFileW(
         request.log_path.c_str(),
         FILE_APPEND_DATA,
         FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -185,85 +141,80 @@ std::optional<DetachedProcess> DetachedProcess::start(
         FILE_ATTRIBUTE_NORMAL,
         nullptr
     ));
-    if (!log_handle.valid()) {
+    if (!opened->valid()) {
       return fail(
           "cannot open log file " + request.log_path.string() + ": " +
           windows_error_message(GetLastError())
       );
     }
   }
-  const HANDLE output_handle = log_handle.valid() ? log_handle.get() : null_handle.get();
 
-  std::wstring command;
-  append_argument(command, request.executable.wstring());
-  for (const auto& arg : request.args) append_argument(command, utf8_to_wide(arg));
-  std::vector<wchar_t> mutable_command(command.begin(), command.end());
-  mutable_command.push_back(L'\0');
+  std::vector<std::wstring> args;
+  args.reserve(request.args.size());
+  for (const auto& arg : request.args)
+    args.push_back(utf8_to_wide(arg));
 
-  STARTUPINFOW startup{};
-  startup.cb = sizeof(startup);
-  startup.dwFlags = STARTF_USESTDHANDLES;
-  startup.hStdInput = null_handle.get();
-  startup.hStdOutput = output_handle;
-  startup.hStdError = output_handle;
+  const auto working_dir = request.working_dir.empty() ? std::filesystem::current_path(ec)
+                                                       : request.working_dir;
 
-  const std::wstring working_dir = request.working_dir.wstring();
-  const wchar_t* cwd = working_dir.empty() ? nullptr : working_dir.c_str();
-  const DWORD base_flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_UNICODE_ENVIRONMENT;
-
-  auto create = [&](DWORD flags, PROCESS_INFORMATION* info) {
-    return CreateProcessW(
-        request.executable.c_str(),
-        mutable_command.data(),
-        nullptr,
-        nullptr,
-        TRUE,
-        flags,
-        nullptr,
-        cwd,
-        &startup,
-        info
-    );
-  };
-
-  // Try to leave any job we are in, so the child outlives it. If the job forbids
-  // breakaway, CreateProcess fails with access denied; retry without it.
-  PROCESS_INFORMATION info{};
-  BOOL created = create(base_flags | CREATE_BREAKAWAY_FROM_JOB, &info);
-  if (!created && GetLastError() == ERROR_ACCESS_DENIED) created = create(base_flags, &info);
-  if (!created) {
+  if (!request.working_dir.empty() && !std::filesystem::is_directory(working_dir, ec)) {
     return fail(
-        "cannot start " + request.executable.string() + ": " + windows_error_message(GetLastError())
+        "cannot start " + request.executable.string() + ": the working directory " +
+        working_dir.string() + " does not exist"
     );
   }
-  CloseHandle(info.hThread);
 
   auto impl = std::make_unique<Impl>();
-  impl->process = info.hProcess;
-  impl->pid = info.dwProcessId;
-  return DetachedProcess(std::move(impl));
-}
+  auto launch = [&](auto flags) {
+    if (opened.has_value()) {
+      const HANDLE log = opened->get();
+      impl->process.emplace(
+          impl->context.get_executor(),
+          request.executable.native(),
+          args,
+          bp::process_start_dir(working_dir.native()),
+          bp::process_stdio{nullptr, log, log},
+          flags
+      );
+    } else {
+      impl->process.emplace(
+          impl->context.get_executor(),
+          request.executable.native(),
+          args,
+          bp::process_start_dir(working_dir.native()),
+          bp::process_stdio{nullptr, nullptr, nullptr},
+          flags
+      );
+    }
+  };
 
-long long DetachedProcess::pid() const { return impl_ ? static_cast<long long>(impl_->pid) : 0; }
-
-bool DetachedProcess::has_exited(int* exit_code) {
-  if (!impl_) return true;
-  if (!impl_->exited) {
-    if (WaitForSingleObject(impl_->process, 0) == WAIT_TIMEOUT) return false;
-    DWORD code = 0;
-    impl_->exit_code = GetExitCodeProcess(impl_->process, &code) ? static_cast<int>(code) : -1;
-    impl_->exited = true;
+  try {
+    // Try to leave any job we are in, so the child outlives it. A job that forbids breakaway
+    // makes the start fail with access denied; start again without it.
+    try {
+      launch(bp::windows::process_creation_flags<kDetached | CREATE_BREAKAWAY_FROM_JOB>{});
+    } catch (const boost::system::system_error& breakaway) {
+      if (breakaway.code().value() != ERROR_ACCESS_DENIED) throw;
+      launch(bp::windows::process_creation_flags<kDetached>{});
+    }
+  } catch (const boost::system::system_error& failure) {
+    return fail("cannot start " + request.executable.string() + ": " + failure.code().message());
   }
-  if (exit_code != nullptr) *exit_code = impl_->exit_code;
-  return true;
+  return DetachedProcess(std::move(impl));
 }
 
 std::filesystem::path find_executable_on_path(const std::string& name) {
   const std::wstring wide = utf8_to_wide(name);
   std::vector<wchar_t> buffer(MAX_PATH);
   for (;;) {
-    const DWORD length =
-        SearchPathW(nullptr, wide.c_str(), L".exe", static_cast<DWORD>(buffer.size()), buffer.data(), nullptr);
+    const DWORD length = SearchPathW(
+        nullptr,
+        wide.c_str(),
+        L".exe",
+        static_cast<DWORD>(buffer.size()),
+        buffer.data(),
+        nullptr
+    );
     if (length == 0) return {};
     if (length < buffer.size()) return std::filesystem::path(std::wstring(buffer.data(), length));
     buffer.resize(length + 1);
@@ -273,7 +224,8 @@ std::filesystem::path find_executable_on_path(const std::string& name) {
 std::filesystem::path current_executable_path() {
   std::vector<wchar_t> buffer(MAX_PATH);
   for (;;) {
-    const DWORD length = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    const DWORD length =
+        GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
     if (length == 0) return {};
     if (length < buffer.size()) return std::filesystem::path(std::wstring(buffer.data(), length));
     buffer.resize(buffer.size() * 2);
@@ -281,12 +233,6 @@ std::filesystem::path current_executable_path() {
 }
 
 #else // POSIX
-
-struct DetachedProcess::Impl {
-  pid_t pid = 0;
-  bool exited = false;
-  int exit_code = 0;
-};
 
 namespace {
 
@@ -298,6 +244,17 @@ int move_above_stdio(int fd) {
   ::close(fd);
   return moved;
 }
+
+// Runs in the child between fork and exec: a session of its own, so a signal sent to the
+// starter's process group (Ctrl-C in a terminal, for one) does not reach it. A failure is
+// reported to the caller the same way a failed exec is.
+struct NewSession {
+  template <typename Launcher, typename Path>
+  boost::system::error_code on_exec_setup(Launcher&, const Path&, const char* const*&) const {
+    if (::setsid() == -1) return boost::system::error_code(errno, boost::system::system_category());
+    return {};
+  }
+};
 
 } // namespace
 
@@ -311,21 +268,10 @@ std::optional<DetachedProcess> DetachedProcess::start(
   };
 
   const std::string exe = request.executable.string();
-  const std::string working_dir = request.working_dir.string();
-
-  // Everything the child needs is prepared before fork, so the child only has to make
-  // async-signal-safe calls.
-  std::vector<std::string> arg_strings;
-  arg_strings.push_back(exe);
-  arg_strings.insert(arg_strings.end(), request.args.begin(), request.args.end());
-  std::vector<char*> argv;
-  argv.reserve(arg_strings.size() + 1);
-  for (auto& arg : arg_strings) argv.push_back(arg.data());
-  argv.push_back(nullptr);
 
   int log_fd = -1;
+  std::error_code ec;
   if (!request.log_path.empty()) {
-    std::error_code ec;
     std::filesystem::create_directories(request.log_path.parent_path(), ec);
     log_fd = move_above_stdio(
         ::open(request.log_path.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600)
@@ -336,107 +282,56 @@ std::optional<DetachedProcess> DetachedProcess::start(
       );
     }
   }
-  const int null_fd = move_above_stdio(::open("/dev/null", O_RDWR | O_CLOEXEC));
-  if (null_fd < 0) {
-    const std::string reason = std::strerror(errno);
-    if (log_fd >= 0) ::close(log_fd);
-    return fail("cannot open /dev/null: " + reason);
-  }
 
-  // The child reports a failed chdir or exec through this pipe. It closes on a
-  // successful exec, so a read that returns nothing means the program started.
-  int status_pipe[2] = {-1, -1};
-  if (::pipe(status_pipe) != 0) {
-    const std::string reason = std::strerror(errno);
-    if (log_fd >= 0) ::close(log_fd);
-    ::close(null_fd);
-    return fail("cannot create a pipe: " + reason);
-  }
-  ::fcntl(status_pipe[0], F_SETFD, FD_CLOEXEC);
-  ::fcntl(status_pipe[1], F_SETFD, FD_CLOEXEC);
+  const auto working_dir = request.working_dir.empty() ? std::filesystem::current_path(ec)
+                                                       : request.working_dir;
 
-  const pid_t pid = ::fork();
-  if (pid < 0) {
-    const std::string reason = std::strerror(errno);
-    if (log_fd >= 0) ::close(log_fd);
-    ::close(null_fd);
-    ::close(status_pipe[0]);
-    ::close(status_pipe[1]);
-    return fail("cannot fork: " + reason);
-  }
-
-  if (pid == 0) {
-    // Child: async-signal-safe calls only.
-    ::setsid();
-    int child_errno = 0;
-    if (!working_dir.empty() && ::chdir(working_dir.c_str()) != 0) {
-      child_errno = errno;
-    } else {
-      const int output_fd = log_fd >= 0 ? log_fd : null_fd;
-      ::dup2(null_fd, STDIN_FILENO);
-      ::dup2(output_fd, STDOUT_FILENO);
-      ::dup2(output_fd, STDERR_FILENO);
-      ::execv(exe.c_str(), argv.data());
-      child_errno = errno;
-    }
-    const ssize_t written = ::write(status_pipe[1], &child_errno, sizeof(child_errno));
-    (void)written;
-    ::_exit(127);
-  }
-
-  ::close(status_pipe[1]);
-  if (log_fd >= 0) ::close(log_fd);
-  ::close(null_fd);
-
-  int child_errno = 0;
-  ssize_t count = 0;
-  do {
-    count = ::read(status_pipe[0], &child_errno, sizeof(child_errno));
-  } while (count < 0 && errno == EINTR);
-  ::close(status_pipe[0]);
-
-  if (count == static_cast<ssize_t>(sizeof(child_errno))) {
-    int ignored = 0;
-    while (::waitpid(pid, &ignored, 0) < 0 && errno == EINTR) {
-    }
-    return fail("cannot start " + exe + ": " + std::strerror(child_errno));
+  if (!request.working_dir.empty() && !std::filesystem::is_directory(working_dir, ec)) {
+    return fail(
+        "cannot start " + request.executable.string() + ": the working directory " +
+        working_dir.string() + " does not exist"
+    );
   }
 
   auto impl = std::make_unique<Impl>();
-  impl->pid = pid;
-  return DetachedProcess(std::move(impl));
-}
-
-long long DetachedProcess::pid() const { return impl_ ? static_cast<long long>(impl_->pid) : 0; }
-
-bool DetachedProcess::has_exited(int* exit_code) {
-  if (!impl_) return true;
-  if (!impl_->exited) {
-    int status = 0;
-    pid_t result = 0;
-    do {
-      result = ::waitpid(impl_->pid, &status, WNOHANG);
-    } while (result < 0 && errno == EINTR);
-    if (result == 0) return false;
-    impl_->exited = true;
-    if (result < 0) {
-      impl_->exit_code = -1;
-    } else if (WIFEXITED(status)) {
-      impl_->exit_code = WEXITSTATUS(status);
-    } else if (WIFSIGNALED(status)) {
-      impl_->exit_code = 128 + WTERMSIG(status);
+  auto launch = [&]() {
+    if (log_fd >= 0) {
+      impl->process.emplace(
+          impl->context.get_executor(),
+          request.executable.native(),
+          request.args,
+          bp::process_start_dir(working_dir.native()),
+          bp::process_stdio{nullptr, log_fd, log_fd},
+          NewSession{}
+      );
     } else {
-      impl_->exit_code = -1;
+      impl->process.emplace(
+          impl->context.get_executor(),
+          request.executable.native(),
+          request.args,
+          bp::process_start_dir(working_dir.native()),
+          bp::process_stdio{nullptr, nullptr, nullptr},
+          NewSession{}
+      );
     }
+  };
+
+  std::string failure;
+  try {
+    launch();
+  } catch (const boost::system::system_error& error_in_launch) {
+    failure = error_in_launch.code().message();
   }
-  if (exit_code != nullptr) *exit_code = impl_->exit_code;
-  return true;
+  if (log_fd >= 0) ::close(log_fd);
+  if (!failure.empty()) return fail("cannot start " + exe + ": " + failure);
+  return DetachedProcess(std::move(impl));
 }
 
 std::filesystem::path find_executable_on_path(const std::string& name) {
   if (name.empty()) return {};
   if (name.find('/') != std::string::npos) {
-    return ::access(name.c_str(), X_OK) == 0 ? std::filesystem::path(name) : std::filesystem::path();
+    return ::access(name.c_str(), X_OK) == 0 ? std::filesystem::path(name)
+                                             : std::filesystem::path();
   }
   const char* path_env = std::getenv("PATH");
   if (path_env == nullptr) return {};
@@ -449,7 +344,8 @@ std::filesystem::path find_executable_on_path(const std::string& name) {
     if (!directory.empty()) {
       const std::filesystem::path candidate = std::filesystem::path(directory) / name;
       std::error_code ec;
-      if (std::filesystem::is_regular_file(candidate, ec) && ::access(candidate.c_str(), X_OK) == 0) {
+      if (std::filesystem::is_regular_file(candidate, ec) &&
+          ::access(candidate.c_str(), X_OK) == 0) {
         return candidate;
       }
     }
@@ -479,7 +375,39 @@ std::filesystem::path current_executable_path() {
 
 #endif
 
-DetachedProcess::DetachedProcess(std::unique_ptr<Impl> impl) : impl_(std::move(impl)) {}
+long long DetachedProcess::pid() const {
+  return impl_ && impl_->process.has_value() ? static_cast<long long>(impl_->process->id()) : 0;
+}
+
+bool DetachedProcess::has_exited(int* exit_code) {
+  if (!impl_ || !impl_->process.has_value()) return true;
+  if (!impl_->exited) {
+    boost::system::error_code ec;
+    if (impl_->process->running(ec) && !ec) return false;
+    impl_->exited = true;
+    if (ec) {
+      impl_->exit_code = -1;
+    } else {
+      const auto status = impl_->process->native_exit_code();
+#ifdef _WIN32
+      impl_->exit_code = static_cast<int>(status);
+#else
+      if (WIFEXITED(status)) {
+        impl_->exit_code = WEXITSTATUS(status);
+      } else if (WIFSIGNALED(status)) {
+        impl_->exit_code = 128 + WTERMSIG(status);
+      } else {
+        impl_->exit_code = -1;
+      }
+#endif
+    }
+  }
+  if (exit_code != nullptr) *exit_code = impl_->exit_code;
+  return true;
+}
+
+DetachedProcess::DetachedProcess(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl)) {}
 DetachedProcess::DetachedProcess(DetachedProcess&&) noexcept = default;
 DetachedProcess& DetachedProcess::operator=(DetachedProcess&&) noexcept = default;
 DetachedProcess::~DetachedProcess() = default;
