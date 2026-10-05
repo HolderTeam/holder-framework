@@ -52,6 +52,9 @@ struct EnsureOptions {
   // Working directory for a spawned holderd; empty picks the installed data directory.
   std::filesystem::path working_dir;
   std::vector<std::string> daemon_args;
+  // Start a spawned daemon with --idle-exit, so it stops itself after this many seconds without
+  // activity. Not used for the systemd service, which stays running.
+  std::optional<int> idle_exit_seconds;
   // The running holderctl, used to find a holderd installed beside it.
   std::filesystem::path holderctl_path;
 };
@@ -65,6 +68,7 @@ struct EnsureResult {
   std::string message;
   nlohmann::json daemon = nlohmann::json::object(); // pid, url, api_version, server_version
   long long spawned_pid = 0; // the holderd this call started, if any
+  int idle_exit_seconds = 0; // set when the spawned daemon was started with --idle-exit
   std::string log_path;
   long long elapsed_ms = 0;
 };

@@ -1,3 +1,4 @@
+#include "ProcessTestSupport.h"
 #include "TestCommand.h"
 #include "http_test_helpers.h"
 
@@ -146,6 +147,7 @@ TEST_CASE("ensure parses its options", "[ensure]") {
         "--daemon", "/opt/holder/bin/holderd",
         "--daemon-arg", "--port",
         "--daemon-arg=0",
+        "--idle-exit", "30",
         "--workdir", "/opt/holder/share/holder-daemon",
     });
     REQUIRE_FALSE(options.allow_start);
@@ -156,6 +158,7 @@ TEST_CASE("ensure parses its options", "[ensure]") {
     REQUIRE(options.daemon_path == std::filesystem::path("/opt/holder/bin/holderd"));
     REQUIRE(options.daemon_args == std::vector<std::string>({"--port", "0"}));
     REQUIRE(options.working_dir == std::filesystem::path("/opt/holder/share/holder-daemon"));
+    REQUIRE(options.idle_exit_seconds == std::optional<int>(30));
   }
 
   SECTION("invalid options are usage errors with exit code 2") {
@@ -168,6 +171,10 @@ TEST_CASE("ensure parses its options", "[ensure]") {
     REQUIRE(usage_exit_code({"--timeout", "soon"}) == holder::cli::kEnsureExitUsage);
     REQUIRE(usage_exit_code({"--timeout", "99999"}) == holder::cli::kEnsureExitUsage);
     REQUIRE(usage_exit_code({"--mode", "magic"}) == holder::cli::kEnsureExitUsage);
+    REQUIRE(usage_exit_code({"--idle-exit", "0"}) == holder::cli::kEnsureExitUsage);
+    REQUIRE(usage_exit_code({"--idle-exit", "1.5"}) == holder::cli::kEnsureExitUsage);
+    REQUIRE(usage_exit_code({"--idle-exit", "soon"}) == holder::cli::kEnsureExitUsage);
+    REQUIRE(usage_exit_code({"--idle-exit", "100000"}) == holder::cli::kEnsureExitUsage);
     REQUIRE(usage_exit_code({"--daemon"}) == holder::cli::kEnsureExitUsage);
   }
 }
@@ -179,6 +186,7 @@ TEST_CASE("ensure renders the documented JSON shape", "[ensure]") {
   started.mode = "spawned";
   started.daemon = {{"pid", 42}, {"url", "http://127.0.0.1:1"}, {"api_version", "0.1"}, {"server_version", "0.2.1"}};
   started.spawned_pid = 42;
+  started.idle_exit_seconds = 30;
   started.log_path = "/tmp/holderd-start.log";
   started.elapsed_ms = 120;
 
@@ -189,6 +197,7 @@ TEST_CASE("ensure renders the documented JSON shape", "[ensure]") {
   REQUIRE(ok_json["mode"] == "spawned");
   REQUIRE(ok_json["exit_code"] == 0);
   REQUIRE(ok_json["spawned_pid"] == 42);
+  REQUIRE(ok_json["idle_exit_seconds"] == 30);
   REQUIRE(ok_json["daemon"]["api_version"] == "0.1");
   REQUIRE(ok_json["log"] == "/tmp/holderd-start.log");
   REQUIRE_FALSE(ok_json.contains("error"));
@@ -208,106 +217,13 @@ TEST_CASE("ensure renders the documented JSON shape", "[ensure]") {
   REQUIRE_FALSE(failed_json.contains("daemon"));
   REQUIRE_FALSE(failed_json.contains("mode"));
   REQUIRE_FALSE(failed_json.contains("spawned_pid"));
+  REQUIRE_FALSE(failed_json.contains("idle_exit_seconds"));
 }
 
 #ifndef _WIN32
 
-namespace {
-
-struct CtlRun {
-  int exit_code = -1;
-  nlohmann::json json;
-  std::string stderr_text;
-};
-
-bool process_alive(long long pid) { return pid > 0 && ::kill(static_cast<pid_t>(pid), 0) == 0; }
-
-void stop_process(long long pid) {
-  if (!process_alive(pid)) return;
-  ::kill(static_cast<pid_t>(pid), SIGTERM);
-  for (int i = 0; i < 100 && process_alive(pid); ++i) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-  if (process_alive(pid)) ::kill(static_cast<pid_t>(pid), SIGKILL);
-}
-
-std::string read_file(const std::filesystem::path& path) {
-  std::ifstream in(path);
-  std::ostringstream text;
-  text << in.rdbuf();
-  return text.str();
-}
-
-// A private home, so a test never sees (or starts) the developer's real daemon. Any
-// daemon or stand-in process a test leaves behind is stopped when the scope ends.
-class IsolatedHome {
- public:
-  IsolatedHome()
-      : root_(holder::test::make_temp_dir()),
-        home_("HOME", (root_ / "home").string()),
-        data_("XDG_DATA_HOME", (root_ / "data").string()),
-        config_("XDG_CONFIG_HOME", (root_ / "config").string()),
-        cache_("XDG_CACHE_HOME", (root_ / "cache").string()),
-        keystore_("HOLDER_TEST_KEYSTORE_DIR", (root_ / "keystore").string()) {
-    std::filesystem::create_directories(root_ / "home");
-  }
-  IsolatedHome(const IsolatedHome&) = delete;
-  IsolatedHome& operator=(const IsolatedHome&) = delete;
-
-  ~IsolatedHome() {
-    for (const auto pid : tracked_) stop_process(pid);
-    if (const auto pid = recorded_daemon_pid()) stop_process(*pid);
-    std::error_code ec;
-    std::filesystem::remove_all(root_, ec);
-  }
-
-  void track(long long pid) { tracked_.push_back(pid); }
-
-  std::filesystem::path info_path() const { return root_ / "data" / "holder" / "server" / "holder.json"; }
-  std::filesystem::path start_log_path() const { return root_ / "cache" / "holder" / "holderd-start.log"; }
-
-  std::optional<long long> recorded_daemon_pid() const {
-    std::ifstream in(info_path());
-    if (!in) return std::nullopt;
-    try {
-      const auto info = nlohmann::json::parse(in);
-      return info.value("pid", 0LL);
-    } catch (const std::exception&) {
-      return std::nullopt;
-    }
-  }
-
-  CtlRun run(const std::string& arguments) const {
-    CtlRun result;
-    const auto out = root_ / "stdout.txt";
-    const auto err = root_ / "stderr.txt";
-    const std::string command = "\"" + std::string(HOLDER_CTL_PATH) + "\" ensure --json " + arguments +
-                                " > \"" + out.string() + "\" 2> \"" + err.string() + "\"";
-    result.exit_code = holder::test::run_system_command(command);
-    result.stderr_text = read_file(err);
-    const auto text = read_file(out);
-    if (!text.empty()) result.json = nlohmann::json::parse(text);
-    return result;
-  }
-
-  // The real daemon on a free port, run from the source tree so it finds its resources.
-  std::string daemon_arguments() const {
-    const auto repo_root = std::filesystem::path(__FILE__).parent_path().parent_path();
-    return "--daemon \"" + std::string(HOLDER_BIN_PATH) + "\" --workdir \"" + repo_root.string() +
-           "\" --daemon-arg --port --daemon-arg 0 --timeout 60";
-  }
-
- private:
-  std::filesystem::path root_;
-  holder::test::EnvGuard home_;
-  holder::test::EnvGuard data_;
-  holder::test::EnvGuard config_;
-  holder::test::EnvGuard cache_;
-  holder::test::EnvGuard keystore_;
-  std::vector<long long> tracked_;
-};
-
-} // namespace
+using holder::test::IsolatedHome;
+using holder::test::process_alive;
 
 TEST_CASE("ensure reports that nothing is running with --no-start", "[ensure][process]") {
   IsolatedHome home;
@@ -426,6 +342,25 @@ TEST_CASE("ensure copes with a stale info file from a daemon that has gone", "[e
   REQUIRE(restarted.exit_code == 0);
   REQUIRE(restarted.json["state"] == "started");
   REQUIRE(restarted.json["daemon"]["pid"].get<long long>() != pid);
+}
+
+TEST_CASE("ensure --idle-exit starts a daemon that stops by itself", "[ensure][process]") {
+  IsolatedHome home;
+  const auto started = home.run(home.daemon_arguments() + " --idle-exit 2");
+  REQUIRE(started.exit_code == 0);
+  REQUIRE(started.json["state"] == "started");
+  REQUIRE(started.json["idle_exit_seconds"] == 2);
+  const auto pid = started.json["daemon"]["pid"].get<long long>();
+
+  // It is still there shortly afterwards, then goes away without being asked.
+  REQUIRE(process_alive(pid));
+  REQUIRE(holder::test::wait_until(std::chrono::seconds(30), [&]() { return !process_alive(pid); }));
+
+  // The next call finds nothing running and starts a fresh daemon.
+  const auto again = home.run(home.daemon_arguments());
+  REQUIRE(again.exit_code == 0);
+  REQUIRE(again.json["state"] == "started");
+  REQUIRE(again.json["daemon"]["pid"].get<long long>() != pid);
 }
 
 #endif
