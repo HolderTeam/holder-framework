@@ -29,6 +29,9 @@ Important:
 - `auth_token` is generated at daemon startup.
 - If daemon restarts, old token becomes invalid and clients must reread `holder.json`.
 
+To make sure a compatible daemon is running (and start one if it is not), run
+`holderctl ensure --json` rather than reimplementing that logic; see [ensure.md](ensure.md).
+
 ## 2) Authentication Model
 
 Most endpoints require:

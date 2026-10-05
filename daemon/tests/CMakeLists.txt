@@ -110,6 +110,7 @@ add_executable(holder_daemon_tests
   HolderCtlSync_test.cpp
   HolderCtlDownload_test.cpp
   HolderCtlExport_test.cpp
+  HolderCtlEnsure_test.cpp
   MilestoneDateTime_test.cpp
   ProjectSyncWorker_test.cpp
   AiLocalModelConfigRepo_test.cpp
@@ -210,6 +211,8 @@ add_executable(holder_daemon_tests
   ../src/cli/commands/MilestoneDateTime.cpp
   ../src/cli/commands/Common.cpp
   ../src/cli/commands/Download.cpp
+  ../src/cli/commands/Ensure.cpp
+  ../src/platform/DetachedProcess.cpp
 )
 target_include_directories(holder_daemon_tests PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../src

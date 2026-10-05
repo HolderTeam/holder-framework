@@ -287,6 +287,12 @@ with bounded output and explicit reconnect recovery. See
 [the event-stream contract](docs/event-streams.md) for snapshot synchronization,
 Git revisions, replay limits and client behavior.
 
+## Starting the daemon from a client
+
+`holderctl ensure` checks that a compatible daemon is running and starts one if it is not,
+so a client application does not have to reimplement that. It prints one JSON object with
+`--json` and uses distinct exit codes. See [the ensure contract](docs/ensure.md).
+
 ## Project removal and upgrades
 
 Removing a project through the API removes it from this device's database and

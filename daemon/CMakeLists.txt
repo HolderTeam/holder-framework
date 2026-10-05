@@ -519,6 +519,7 @@ add_executable(holderctl
   src/cli/commands/Common.cpp
   src/cli/commands/Download.cpp
   src/cli/commands/DaemonCommands.cpp
+  src/cli/commands/Ensure.cpp
   src/cli/commands/MilestoneDateTime.cpp
   src/cli/commands/Support.cpp
   src/cli/commands/card.cpp
@@ -534,6 +535,7 @@ add_executable(holderctl
   src/cli/commands/trash.cpp
   src/cli/commands/SystemCommands.cpp
   src/platform/BaseDir.cpp
+  src/platform/DetachedProcess.cpp
   src/platform/Paths.cpp
 )
 target_include_directories(holderctl PRIVATE

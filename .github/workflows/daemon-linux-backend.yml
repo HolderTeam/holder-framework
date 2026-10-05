@@ -203,6 +203,63 @@ jobs:
           daemon_pid=""
           trap - EXIT
 
+      - name: Smoke-test holderctl ensure
+        working-directory: daemon
+        run: |
+          set -euo pipefail
+
+          stage_dir="${PWD}/out/artifacts/linux-backend"
+          multiarch="$(gcc -print-multiarch)"
+          export LD_LIBRARY_PATH="${stage_dir}/usr/lib/${multiarch}:${stage_dir}/usr/lib"
+
+          runtime_dir="$(mktemp -d)"
+          export HOME="${runtime_dir}/home"
+          mkdir -p "${HOME}"
+          export XDG_DATA_HOME="${runtime_dir}/data"
+          export XDG_CONFIG_HOME="${runtime_dir}/config"
+          export XDG_CACHE_HOME="${runtime_dir}/cache"
+          # Headless runner: use Holder's explicit test keystore, as the smoke test above does.
+          export HOLDER_TEST_KEYSTORE_DIR="${runtime_dir}/keystore"
+
+          ctl="${stage_dir}/usr/bin/holderctl"
+          api_version="$(tr -d '[:space:]' < API_VERSION)"
+          field() {
+            python3 -c 'import json, sys; print(json.load(sys.stdin)'"$1"')'
+          }
+
+          daemon_pid=""
+          cleanup() {
+            if [ -n "${daemon_pid}" ] && kill -0 "${daemon_pid}" 2>/dev/null; then
+              kill -TERM "${daemon_pid}" 2>/dev/null || true
+            fi
+          }
+          trap cleanup EXIT
+
+          # Nothing is running yet: --no-start reports that with exit status 11.
+          status=0
+          "${ctl}" ensure --json --no-start >/dev/null 2>&1 || status=$?
+          test "${status}" -eq 11
+
+          # Start the staged holderd found beside holderctl, using the API range of this build.
+          started="$("${ctl}" ensure --json --api-min "${api_version}" --timeout 60)"
+          printf '%s\n' "${started}"
+          test "$(printf '%s' "${started}" | field '["state"]')" = started
+          test "$(printf '%s' "${started}" | field '["mode"]')" = spawned
+          daemon_pid="$(printf '%s' "${started}" | field '["daemon"]["pid"]')"
+
+          # It keeps running after holderctl exited, and a second call reuses it.
+          kill -0 "${daemon_pid}"
+          again="$("${ctl}" ensure --json)"
+          test "$(printf '%s' "${again}" | field '["state"]')" = running
+          test "$(printf '%s' "${again}" | field '["daemon"]["pid"]')" = "${daemon_pid}"
+
+          # An unsupported API range is refused with exit status 10.
+          status=0
+          "${ctl}" ensure --json --api-min 999 >/dev/null || status=$?
+          test "${status}" -eq 10
+
+          "${ctl}" health
+
       - name: Archive backend artifact
         working-directory: daemon
         run: |
