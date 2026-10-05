@@ -29,9 +29,9 @@ window (Windows), so it keeps running when `holderctl` and the client exit. Its 
 output and error are appended to `holderd-start.log` in the Holder cache directory
 (`~/.cache/holder` on Linux).
 
-**The daemon keeps running after the client exits.** Nothing in `ensure` stops it. A later
-change will let an ephemeral daemon exit by itself when it is idle; until then, stop one
-you started with `SIGTERM` (the PID is in the result).
+**By default the daemon keeps running after the client exits.** Nothing in `ensure` stops it;
+stop one you started with `SIGTERM` (the PID is in the result). To have a spawned daemon stop
+by itself when it is no longer used, pass `--idle-exit SECONDS` (see [idle-exit.md](idle-exit.md)).
 
 ## Options
 
@@ -46,6 +46,7 @@ you started with `SIGTERM` (the PID is in the result).
 | `--daemon PATH` | The `holderd` to start. Implies spawning. |
 | `--daemon-arg ARG` | An argument for `holderd`; repeat for several. |
 | `--workdir PATH` | Working directory for a spawned `holderd`. |
+| `--idle-exit SECONDS` | Start a spawned `holderd` with `--idle-exit`, so it stops itself after this long without activity (1 to 86400). Not used for the systemd service, or when a compatible daemon is already running. |
 
 Options that take a value also accept `--option=value`.
 
@@ -84,6 +85,7 @@ Success:
     "server_version": "0.2.1"
   },
   "spawned_pid": 330887,
+  "idle_exit_seconds": 30,
   "log": "/home/user/.cache/holder/holderd-start.log"
 }
 ```
@@ -111,6 +113,7 @@ Failure:
 | `mode` | `existing`, `service` or `spawned`. Absent on failure when nothing was started. |
 | `daemon` | The daemon that was found or started. Also present when it is running but incompatible. |
 | `spawned_pid` | The `holderd` this call started, if any, including when it never became healthy. |
+| `idle_exit_seconds` | Present when the spawned daemon was started with `--idle-exit`. |
 | `log` | The start log, when a daemon was spawned. |
 | `error` | `code` and a human-readable `message`, on failure only. |
 
