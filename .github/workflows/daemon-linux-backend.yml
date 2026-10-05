@@ -260,6 +260,31 @@ jobs:
 
           "${ctl}" health
 
+          # Stop that daemon, then check that one started with --idle-exit stops by itself.
+          kill -TERM "${daemon_pid}"
+          for _ in $(seq 1 300); do
+            kill -0 "${daemon_pid}" 2>/dev/null || break
+            sleep 0.1
+          done
+          if kill -0 "${daemon_pid}" 2>/dev/null; then
+            echo "the first daemon did not stop" >&2
+            exit 1
+          fi
+
+          ephemeral="$("${ctl}" ensure --json --idle-exit 2 --timeout 60)"
+          printf '%s\n' "${ephemeral}"
+          test "$(printf '%s' "${ephemeral}" | field '["state"]')" = started
+          test "$(printf '%s' "${ephemeral}" | field '["idle_exit_seconds"]')" = 2
+          daemon_pid="$(printf '%s' "${ephemeral}" | field '["daemon"]["pid"]')"
+          for _ in $(seq 1 300); do
+            kill -0 "${daemon_pid}" 2>/dev/null || break
+            sleep 0.1
+          done
+          if kill -0 "${daemon_pid}" 2>/dev/null; then
+            echo "the daemon started with --idle-exit did not stop by itself" >&2
+            exit 1
+          fi
+
       - name: Archive backend artifact
         working-directory: daemon
         run: |
