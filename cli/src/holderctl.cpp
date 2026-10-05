@@ -31,6 +31,7 @@ int main(int argc, char* argv[]) {
     if (command == "status") return holder::cli::command_status(paths);
     if (command == "health") return holder::cli::command_health(paths);
     if (command == "ensure") return holder::cli::command_ensure(paths, argc, argv);
+    if (command == "start") return holder::cli::command_start(paths, argc, argv);
     if (command == "paths") return holder::cli::command_paths(paths);
     if (command == "project") return holder::cli::command_project(paths, argc, argv);
     if (command == "projects") return holder::cli::command_projects(paths, argc, argv);

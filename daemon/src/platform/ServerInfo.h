@@ -13,6 +13,9 @@ struct ServerInfo {
   std::string api_version;
   std::string server_version;
   std::string auth_token;
+  // Seconds of quiet after which the daemon stops itself (--idle-exit); 0 when it runs until it
+  // is stopped. Lets a client tell a daemon meant to stay from one that will go.
+  int idle_exit_seconds = 0;
 };
 
 int current_pid();

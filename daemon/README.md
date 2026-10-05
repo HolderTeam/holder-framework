@@ -298,6 +298,9 @@ A daemon started for one client can stop by itself when nothing needs it:
 request, an open event stream or background work needs it. See
 [the idle-exit contract](docs/idle-exit.md).
 
+To start a daemon yourself that keeps running until you stop it, use `holderctl start`. It reports
+(exit status 15) if the daemon already running is one that will stop itself when idle.
+
 ## Project removal and upgrades
 
 Removing a project through the API removes it from this device's database and

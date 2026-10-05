@@ -102,3 +102,10 @@ starts a fresh one.
   stream relies on its requests: any request within `SECONDS` keeps the daemon alive.
 - Choose `SECONDS` long enough to cover a reconnect, and short enough that closing the
   application feels like it takes the daemon away. Tens of seconds is typical.
+
+## Telling whether a daemon will stop
+
+A daemon started with `--idle-exit` records the period as `idle_exit_seconds` in its info file
+(`holder.json`); a daemon that stays running leaves the field out. `holderctl status` prints it,
+`holderctl ensure --json` reports it as `daemon.idle_exit_seconds`, and `holderctl start` uses it to
+refuse a running daemon that would not stay (exit status 15; see [ensure.md](ensure.md)).

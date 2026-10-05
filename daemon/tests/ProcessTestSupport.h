@@ -27,6 +27,7 @@ namespace holder::test {
 struct CtlRun {
   int exit_code = -1;
   nlohmann::json json;
+  std::string stdout_text;
   std::string stderr_text;
 };
 
@@ -85,7 +86,8 @@ class IsolatedHome {
   IsolatedHome& operator=(const IsolatedHome&) = delete;
 
   ~IsolatedHome() {
-    for (const auto pid : tracked_) stop_process(pid);
+    for (const auto pid : tracked_)
+      stop_process(pid);
     if (const auto info = daemon_info()) stop_process(info->pid);
     std::error_code ec;
     std::filesystem::remove_all(root_, ec);
@@ -98,8 +100,12 @@ class IsolatedHome {
   static std::filesystem::path source_root() {
     return std::filesystem::path(__FILE__).parent_path().parent_path();
   }
-  std::filesystem::path info_path() const { return root_ / "data" / "holder" / "server" / "holder.json"; }
-  std::filesystem::path start_log_path() const { return root_ / "cache" / "holder" / "holderd-start.log"; }
+  std::filesystem::path info_path() const {
+    return root_ / "data" / "holder" / "server" / "holder.json";
+  }
+  std::filesystem::path start_log_path() const {
+    return root_ / "cache" / "holder" / "holderd-start.log";
+  }
 
   std::optional<DaemonInfo> daemon_info() const {
     std::ifstream in(info_path());
@@ -127,23 +133,30 @@ class IsolatedHome {
     return info;
   }
 
-  CtlRun run(const std::string& arguments) const {
+  // `holderctl ensure --json ARGUMENTS`.
+  CtlRun run(const std::string& arguments) const { return run_ctl("ensure", arguments, true); }
+
+  // `holderctl SUBCOMMAND [--json] ARGUMENTS`. With json, standard output is parsed.
+  CtlRun run_ctl(const std::string& subcommand, const std::string& arguments, bool json = true)
+      const {
     CtlRun result;
     const auto out = root_ / "stdout.txt";
     const auto err = root_ / "stderr.txt";
-    const std::string command = "\"" + std::string(HOLDER_CTL_PATH) + "\" ensure --json " + arguments +
-                                " > \"" + out.string() + "\" 2> \"" + err.string() + "\"";
+    const std::string command = "\"" + std::string(HOLDER_CTL_PATH) + "\" " + subcommand +
+                                (json ? " --json " : " ") + arguments + " > \"" + out.string() +
+                                "\" 2> \"" + err.string() + "\"";
     result.exit_code = holder::test::run_system_command(command);
     result.stderr_text = read_file(err);
-    const auto text = read_file(out);
-    if (!text.empty()) result.json = nlohmann::json::parse(text);
+    result.stdout_text = read_file(out);
+    if (json && !result.stdout_text.empty())
+      result.json = nlohmann::json::parse(result.stdout_text);
     return result;
   }
 
   // The real daemon on a free port, run from the source tree so it finds its resources.
   std::string daemon_arguments() const {
-    return "--daemon \"" + std::string(HOLDER_BIN_PATH) + "\" --workdir \"" + source_root().string() +
-           "\" --daemon-arg --port --daemon-arg 0 --timeout 60";
+    return "--daemon \"" + std::string(HOLDER_BIN_PATH) + "\" --workdir \"" +
+           source_root().string() + "\" --daemon-arg --port --daemon-arg 0 --timeout 60";
   }
 
  private:

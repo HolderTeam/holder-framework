@@ -33,8 +33,12 @@ int command_status(const holder::core::Paths& paths) {
               << "PID: " << pid << "\n"
               << "URL: http://" << bind << ":" << port << "\n"
               << "API version: " << json_string(info.json, "api_version", "unknown") << "\n"
-              << "Server version: " << json_string(info.json, "server_version", "unknown") << "\n"
-              << "Info file: " << info.path.string() << "\n";
+              << "Server version: " << json_string(info.json, "server_version", "unknown") << "\n";
+    const int idle_exit = json_int(info.json, "idle_exit_seconds");
+    if (idle_exit > 0) {
+      std::cout << "Idle exit: stops after " << idle_exit << " seconds without activity\n";
+    }
+    std::cout << "Info file: " << info.path.string() << "\n";
     return running ? 0 : 1;
   } catch (const std::exception& ex) {
     std::cout << "Holder daemon: not running\n"

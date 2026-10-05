@@ -19,6 +19,8 @@ inline constexpr int kEnsureExitNotRunning = 11;
 inline constexpr int kEnsureExitStartFailed = 12;
 inline constexpr int kEnsureExitTimeout = 13;
 inline constexpr int kEnsureExitDaemonNotFound = 14;
+// Only for `holderctl start`: the running daemon will stop itself when idle.
+inline constexpr int kEnsureExitEphemeral = 15;
 
 // The daemon API versions a caller supports: minimum is inclusive, maximum_exclusive is the
 // first unsupported version. An empty bound is not checked.
@@ -38,7 +40,10 @@ struct ApiCompatibility {
   std::string reason;
 };
 
-ApiCompatibility check_api_compatibility(const std::string& daemon_api_version, const ApiRange& range);
+ApiCompatibility check_api_compatibility(
+    const std::string& daemon_api_version,
+    const ApiRange& range
+);
 
 enum class EnsureMode { Auto, Service, Spawn };
 
@@ -55,6 +60,9 @@ struct EnsureOptions {
   // Start a spawned daemon with --idle-exit, so it stops itself after this many seconds without
   // activity. Not used for the systemd service, which stays running.
   std::optional<int> idle_exit_seconds;
+  // The caller needs a daemon that stays running (`holderctl start`): a healthy daemon that was
+  // started with --idle-exit is refused with kEnsureExitEphemeral instead of accepted.
+  bool keep_running = false;
   // The running holderctl, used to find a holderd installed beside it.
   std::filesystem::path holderctl_path;
 };

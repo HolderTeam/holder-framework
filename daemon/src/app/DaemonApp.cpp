@@ -323,6 +323,7 @@ int run_daemon(int argc, char* argv[]) {
   info.api_version = CARD_SERVER_API_VERSION;
   info.server_version = CARD_SERVER_VERSION;
   info.auth_token = holder::core::generate_auth_token();
+  info.idle_exit_seconds = idle_exit_seconds;
 
   spdlog::info("holder boot complete.");
 

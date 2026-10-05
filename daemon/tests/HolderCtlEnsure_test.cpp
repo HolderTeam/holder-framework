@@ -393,6 +393,93 @@ TEST_CASE("ensure copes with a stale info file from a daemon that has gone", "[e
   REQUIRE(restarted.json["daemon"]["pid"].get<long long>() != pid);
 }
 
+TEST_CASE("start starts a daemon that stays running, and reuses it", "[start][process]") {
+  IsolatedHome home;
+  const auto first = home.run_ctl("start", home.daemon_arguments());
+  REQUIRE(first.exit_code == 0);
+  REQUIRE(first.json["ok"] == true);
+  REQUIRE(first.json["state"] == "started");
+  REQUIRE_FALSE(first.json.contains("idle_exit_seconds"));
+  REQUIRE_FALSE(first.json["daemon"].contains("idle_exit_seconds"));
+  const auto pid = first.json["daemon"]["pid"].get<long long>();
+  REQUIRE(process_alive(pid));
+
+  // The info file says it is not ephemeral.
+  const auto info_text = holder::test::read_file(home.info_path());
+  REQUIRE(info_text.find("idle_exit_seconds") == std::string::npos);
+
+  const auto second = home.run_ctl("start", "");
+  REQUIRE(second.exit_code == 0);
+  REQUIRE(second.json["state"] == "running");
+  REQUIRE(second.json["daemon"]["pid"] == pid);
+}
+
+TEST_CASE("start refuses a running daemon that will stop itself", "[start][process]") {
+  IsolatedHome home;
+  const auto ephemeral = home.run("--idle-exit 30 " + home.daemon_arguments());
+  REQUIRE(ephemeral.exit_code == 0);
+  REQUIRE(ephemeral.json["daemon"]["idle_exit_seconds"] == 30);
+  const auto pid = ephemeral.json["daemon"]["pid"].get<long long>();
+
+  const auto start = home.run_ctl("start", "");
+  REQUIRE(start.exit_code == holder::cli::kEnsureExitEphemeral);
+  REQUIRE(start.json["ok"] == false);
+  REQUIRE(start.json["error"]["code"] == "ephemeral");
+  const auto message = start.json["error"]["message"].get<std::string>();
+  REQUIRE(message.find(std::to_string(pid)) != std::string::npos);
+  REQUIRE(message.find("30") != std::string::npos);
+  // It leaves the daemon alone.
+  REQUIRE(process_alive(pid));
+}
+
+TEST_CASE("ensure still accepts a daemon that will stop itself", "[start][process]") {
+  IsolatedHome home;
+  REQUIRE(home.run("--idle-exit 30 " + home.daemon_arguments()).exit_code == 0);
+  const auto again = home.run("");
+  REQUIRE(again.exit_code == 0);
+  REQUIRE(again.json["state"] == "running");
+  REQUIRE(again.json["daemon"]["idle_exit_seconds"] == 30);
+}
+
+TEST_CASE("status says when a daemon will stop itself", "[start][process]") {
+  IsolatedHome home;
+  REQUIRE(home.run("--idle-exit 45 " + home.daemon_arguments()).exit_code == 0);
+  const auto status = home.run_ctl("status", "", false);
+  REQUIRE(status.exit_code == 0);
+  REQUIRE(status.stdout_text.find("Idle exit: stops after 45 seconds") != std::string::npos);
+}
+
+TEST_CASE("status does not mention an idle exit for a daemon that stays", "[start][process]") {
+  IsolatedHome home;
+  REQUIRE(home.run_ctl("start", home.daemon_arguments()).exit_code == 0);
+  const auto status = home.run_ctl("status", "", false);
+  REQUIRE(status.exit_code == 0);
+  REQUIRE(status.stdout_text.find("Idle exit") == std::string::npos);
+}
+
+TEST_CASE("start does not take --idle-exit", "[start][process]") {
+  IsolatedHome home;
+  const auto run = home.run_ctl("start", "--idle-exit 5 --no-start", false);
+  REQUIRE(run.exit_code == holder::cli::kEnsureExitUsage);
+  REQUIRE(run.stderr_text.find("ensure --idle-exit") != std::string::npos);
+}
+
+TEST_CASE("start says in words what it did", "[start][process]") {
+  IsolatedHome home;
+  const auto run = home.run_ctl("start", home.daemon_arguments(), false);
+  REQUIRE(run.exit_code == 0);
+  REQUIRE(run.stdout_text.find("Holder daemon: started") != std::string::npos);
+  REQUIRE(run.stdout_text.find("stays running until it is stopped") != std::string::npos);
+  REQUIRE(run.stdout_text.find("URL: http://") != std::string::npos);
+}
+
+TEST_CASE("start reports a failure like ensure does", "[start][process]") {
+  IsolatedHome home;
+  const auto run = home.run_ctl("start", "--no-start");
+  REQUIRE(run.exit_code == holder::cli::kEnsureExitNotRunning);
+  REQUIRE(run.json["error"]["code"] == "not_running");
+}
+
 TEST_CASE("ensure --idle-exit starts a daemon that stops by itself", "[ensure][process]") {
   IsolatedHome home;
   const auto started = home.run(home.daemon_arguments() + " --idle-exit 2");
