@@ -2,6 +2,7 @@
 
 #include "api/Listener.h"
 #include "api/support/Health.h"
+#include "core/ActivityTracker.h"
 #include "platform/Paths.h"
 
 #include <boost/beast/http.hpp>
@@ -56,6 +57,17 @@ HttpServer::HttpServer(
     response.prepare_payload();
     res = std::move(response);
   });
+
+  // A client that is leaving says so. Only a hint: see holder::core::ActivityTracker.
+  router_.add(http::verb::post, "/bye", [](const Router::Request&, Router::Response& res) {
+    holder::core::activity().say_goodbye();
+    http::response<http::string_body> response{http::status::ok, 11};
+    response.set(http::field::content_type, "application/json");
+    response.keep_alive(false);
+    response.body() = R"({"ok":true})";
+    response.prepare_payload();
+    res = std::move(response);
+  });
 }
 
 HttpServer::~HttpServer() = default;
@@ -94,6 +106,8 @@ void HttpServer::stop() {
   }
 }
 
-std::size_t HttpServer::open_stream_count() { return listener_ ? listener_->open_stream_count() : 0; }
+std::size_t HttpServer::open_stream_count() {
+  return listener_ ? listener_->open_stream_count() : 0;
+}
 
 } // namespace holder::api

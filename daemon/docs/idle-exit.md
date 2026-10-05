@@ -40,6 +40,31 @@ finishes starting, so the process that started it has `SECONDS` to connect.
 - **The local model runner's status probe**, which only polls.
 - **A connection that was accepted but has sent no request.**
 
+## Saying goodbye
+
+A client that is closing can tell the daemon with `POST /bye` (authenticated, no body, returns
+`{"ok":true}`). It is a hint, not a command. The daemon still waits for `SECONDS` of quiet in
+general, but once a client has said goodbye it waits only 3 seconds, and only while nothing else
+happens:
+
+- Running work and open event streams still keep it up, so a second client that stays
+  subscribed is never cut off by the first one leaving.
+- A new connection, or any request other than `/bye`, cancels the goodbye and the full period
+  applies again.
+- The goodbye request itself, and the stream closing right after it, count as the last activity,
+  so the 3 seconds start from the moment the client has gone.
+- A daemon started without `--idle-exit`, such as the systemd service, acknowledges it and
+  ignores it.
+
+Calling it is best effort. A client that crashes or loses the connection never says goodbye, and
+the daemon falls back to its idle period, so nothing depends on it being sent. A client that
+needs the daemon to keep running should hold an event stream open, which is what presence means;
+a script that only makes occasional requests can lose its daemon 3 seconds after another
+client's goodbye if it was not using it at the time.
+
+The log says `a client said goodbye and nothing has happened since; exiting…` in this case,
+instead of `idle for N seconds…`.
+
 ## The final push
 
 When the daemon finds itself idle, and before it stops, it pushes every project that has

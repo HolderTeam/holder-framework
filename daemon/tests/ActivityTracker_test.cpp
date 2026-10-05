@@ -69,11 +69,14 @@ TEST_CASE("quiet time restarts when activity is recorded", "[activity]") {
 
   std::this_thread::sleep_for(120ms);
   REQUIRE(tracker.quiet_for() >= 100ms);
-  { const auto scope = tracker.begin(); }  // starting and finishing work both count as activity
+  { const auto scope = tracker.begin(); } // starting and finishing work both count as activity
   REQUIRE(tracker.quiet_for() < 100ms);
 }
 
-TEST_CASE("the daemon is idle only with no work, no streams and a full quiet period", "[activity]") {
+TEST_CASE(
+    "the daemon is idle only with no work, no streams and a full quiet period",
+    "[activity]"
+) {
   ActivityTracker tracker;
 
   SECTION("a new tracker is not idle until the quiet period has passed") {
@@ -111,10 +114,89 @@ TEST_CASE("scopes taken on many threads always balance", "[activity]") {
       }
     });
   }
-  for (auto& thread : threads) thread.join();
+  for (auto& thread : threads)
+    thread.join();
   REQUIRE(tracker.active() == 0);
 }
 
 TEST_CASE("the process-wide tracker is a single instance", "[activity]") {
   REQUIRE(&holder::core::activity() == &holder::core::activity());
+}
+
+TEST_CASE(
+    "a goodbye lets an otherwise idle daemon stop after a short grace",
+    "[activity][goodbye]"
+) {
+  ActivityTracker tracker(50ms);
+  const auto long_quiet = std::chrono::hours(1);
+  REQUIRE_FALSE(tracker.goodbye_pending());
+
+  tracker.say_goodbye();
+  REQUIRE(tracker.goodbye_pending());
+  REQUIRE_FALSE(tracker.idle(long_quiet));
+
+  std::this_thread::sleep_for(120ms);
+  REQUIRE(tracker.idle(long_quiet));
+}
+
+TEST_CASE("without a goodbye the full quiet period still applies", "[activity][goodbye]") {
+  ActivityTracker tracker(10ms);
+  std::this_thread::sleep_for(60ms);
+  REQUIRE_FALSE(tracker.idle(std::chrono::hours(1)));
+}
+
+TEST_CASE(
+    "a goodbye never shortens a quiet period that is already shorter",
+    "[activity][goodbye]"
+) {
+  ActivityTracker tracker(std::chrono::hours(1));
+  tracker.say_goodbye();
+  std::this_thread::sleep_for(60ms);
+  REQUIRE(tracker.idle(30ms));
+}
+
+TEST_CASE(
+    "a goodbye does not override work, open streams or recent activity",
+    "[activity][goodbye]"
+) {
+  ActivityTracker tracker(10ms);
+  tracker.say_goodbye();
+  std::this_thread::sleep_for(40ms);
+  REQUIRE(tracker.idle(std::chrono::hours(1)));
+
+  {
+    const auto work = tracker.begin();
+    REQUIRE_FALSE(tracker.idle(std::chrono::hours(1)));
+  }
+  REQUIRE_FALSE(tracker.idle(std::chrono::hours(1), 1));
+  tracker.touch();
+  tracker.say_goodbye();
+  tracker.touch();
+  REQUIRE_FALSE(tracker.idle(std::chrono::hours(1)));
+}
+
+TEST_CASE("cancelling a goodbye restores the full quiet period", "[activity][goodbye]") {
+  ActivityTracker tracker(10ms);
+  tracker.say_goodbye();
+  tracker.cancel_goodbye();
+  REQUIRE_FALSE(tracker.goodbye_pending());
+  std::this_thread::sleep_for(60ms);
+  REQUIRE_FALSE(tracker.idle(std::chrono::hours(1)));
+}
+
+TEST_CASE(
+    "a new connection or request cancels a goodbye, the goodbye request itself does not",
+    "[activity][goodbye]"
+) {
+  ActivityTracker tracker(10ms);
+  tracker.say_goodbye();
+  tracker.request_started("/bye");
+  REQUIRE(tracker.goodbye_pending());
+
+  tracker.request_started("/health");
+  REQUIRE_FALSE(tracker.goodbye_pending());
+
+  tracker.say_goodbye();
+  tracker.connection_arrived();
+  REQUIRE_FALSE(tracker.goodbye_pending());
 }
