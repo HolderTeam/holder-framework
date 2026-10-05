@@ -21,8 +21,10 @@ The daemon is idle, and stops, only when **all** of these hold:
    inside its request, so it counts.
 2. No event stream is open: the change feed (`GET /events`) and the AI run and runner event
    streams. A client that stays subscribed is present for as long as it is subscribed.
-3. No background work is running: a sync pass (the pull when the daemon starts, or a push or
-   pull cycle), a local model download, or a resource import.
+3. No background work is running: a sync that is actually due (the pull when the daemon starts,
+   or a push or pull that has come round), a local model download, or a resource import. The
+   sync worker waking every 30 seconds to find nothing due is not work, so `SECONDS` can be
+   longer than that.
 4. Nothing has happened for `SECONDS`: no connection arrived, no request started or finished,
    no stream closed, no background work started or finished.
 

@@ -285,6 +285,23 @@ jobs:
             exit 1
           fi
 
+          # An idle period longer than the sync worker's 30 second poll must also be reachable.
+          # Waking up to find nothing to sync once reset the quiet timer, so a long period never
+          # elapsed while the short one above passed.
+          patient="$("${ctl}" ensure --json --idle-exit 40 --timeout 60)"
+          printf '%s\n' "${patient}"
+          test "$(printf '%s' "${patient}" | field '["state"]')" = started
+          daemon_pid="$(printf '%s' "${patient}" | field '["daemon"]["pid"]')"
+          for _ in $(seq 1 1200); do
+            kill -0 "${daemon_pid}" 2>/dev/null || break
+            sleep 0.1
+          done
+          if kill -0 "${daemon_pid}" 2>/dev/null; then
+            echo "the daemon started with --idle-exit 40 did not stop by itself" >&2
+            kill -TERM "${daemon_pid}" 2>/dev/null || true
+            exit 1
+          fi
+
       - name: Archive backend artifact
         working-directory: daemon
         run: |
