@@ -716,13 +716,16 @@ TEST_CASE("Listener rejects background requests when lane queue is full", "[list
                                      "\r\n"
                                      "Connection: close\r\n"
                                      "\r\n";
-  for (int i = 0; i < 64; ++i) {
+  // One connection at a time, waiting for each request to reach the lane queue. Sending all 64
+  // at once races the single ingress worker: together with the readiness probe's connection
+  // they can exceed the 64 accepted sockets allowed to wait, and one is dropped.
+  for (std::size_t i = 0; i < 64; ++i) {
     sockets.emplace_back(connect_test_socket(ioc, bound.bind, bound.port));
     write_raw_request(sockets.back(), queued_request);
-  }
-
-  for (int i = 0; i < 50 && listener.background_queue_count() < 64; ++i) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    for (int wait = 0; wait < 500 && listener.background_queue_count() < i + 1; ++wait) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    REQUIRE(listener.background_queue_count() == i + 1);
   }
   REQUIRE(listener.background_queue_count() == 64);
 
