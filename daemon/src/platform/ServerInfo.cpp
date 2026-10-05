@@ -107,6 +107,7 @@ void write_server_info(const std::filesystem::path& path, const ServerInfo& info
   j["api_version"] = info.api_version;
   j["server_version"] = info.server_version;
   j["auth_token"] = info.auth_token;
+  if (info.idle_exit_seconds > 0) j["idle_exit_seconds"] = info.idle_exit_seconds;
 
   const auto tmp_path = path.string() + ".tmp" + unique_temp_suffix();
   write_owner_only_file(tmp_path, j.dump(2) + "\n");

@@ -26,6 +26,8 @@ Current fields written by backend:
 
 Important:
 
+- `idle_exit_seconds` is present only for a daemon started with `--idle-exit`, which stops itself after that
+  many seconds without activity (see [idle-exit.md](idle-exit.md)).
 - `auth_token` is generated at daemon startup.
 - If daemon restarts, old token becomes invalid and clients must reread `holder.json`.
 

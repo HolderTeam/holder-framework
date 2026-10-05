@@ -49,7 +49,9 @@ bool take_value(
 
 void require_api_version(const std::string& value, const char* option) {
   if (!parse_api_version(value)) {
-    usage_error(std::string("Option ") + option + " needs a version such as 0.1, got '" + value + "'");
+    usage_error(
+        std::string("Option ") + option + " needs a version such as 0.1, got '" + value + "'"
+    );
   }
 }
 
@@ -60,6 +62,7 @@ struct Probe {
   std::string url;
   std::string api_version;
   std::string server_version;
+  int idle_exit_seconds = 0; // 0: not started with --idle-exit
 };
 
 Probe probe_daemon(const holder::core::Paths& paths) {
@@ -76,6 +79,7 @@ Probe probe_daemon(const holder::core::Paths& paths) {
     probe.url = "http://" + connection.bind + ":" + std::to_string(connection.port);
     probe.api_version = json_string(info, "api_version");
     probe.server_version = json_string(info, "server_version");
+    probe.idle_exit_seconds = json_int(info, "idle_exit_seconds");
     if (!is_process_running(probe.pid)) {
       probe.detail = "process " + std::to_string(probe.pid) + " is not running";
       return probe;
@@ -103,12 +107,14 @@ Probe probe_daemon(const holder::core::Paths& paths) {
 }
 
 nlohmann::json daemon_json(const Probe& probe) {
-  return {
+  nlohmann::json json = {
       {"pid", probe.pid},
       {"url", probe.url},
       {"api_version", probe.api_version},
       {"server_version", probe.server_version},
   };
+  if (probe.idle_exit_seconds > 0) json["idle_exit_seconds"] = probe.idle_exit_seconds;
+  return json;
 }
 
 #if defined(__linux__)
@@ -141,11 +147,8 @@ std::filesystem::path systemctl_path() {
 bool service_unit_installed() {
   const auto systemctl = systemctl_path();
   if (systemctl.empty()) return false;
-  const auto code = run_to_completion(
-      systemctl,
-      {"--user", "cat", kServiceUnit},
-      std::chrono::seconds(5)
-  );
+  const auto code =
+      run_to_completion(systemctl, {"--user", "cat", kServiceUnit}, std::chrono::seconds(5));
   return code.has_value() && *code == 0;
 }
 
@@ -184,8 +187,9 @@ std::filesystem::path absolute_path(const std::filesystem::path& path) {
 std::filesystem::path locate_daemon(const EnsureOptions& options) {
   std::error_code ec;
   if (!options.daemon_path.empty()) {
-    return std::filesystem::is_regular_file(options.daemon_path, ec) ? absolute_path(options.daemon_path)
-                                                                       : std::filesystem::path();
+    return std::filesystem::is_regular_file(options.daemon_path, ec)
+               ? absolute_path(options.daemon_path)
+               : std::filesystem::path();
   }
 #ifdef _WIN32
   const char* name = "holderd.exe";
@@ -212,7 +216,8 @@ std::filesystem::path default_working_dir(const std::filesystem::path& daemon) {
 std::string describe_seconds(std::chrono::milliseconds value) {
   const double seconds = static_cast<double>(value.count()) / 1000.0;
   std::string text = std::to_string(seconds);
-  while (!text.empty() && text.back() == '0') text.pop_back();
+  while (!text.empty() && text.back() == '0')
+    text.pop_back();
   if (!text.empty() && text.back() == '.') text.pop_back();
   return text;
 }
@@ -242,7 +247,20 @@ void print_ensure_usage(std::ostream& out) {
       << "  11  no daemon is running (with --no-start)\n"
       << "  12  the daemon could not be started\n"
       << "  13  the daemon did not become healthy in time\n"
-      << "  14  holderd was not found\n";
+      << "  14  holderd was not found\n"
+      << "  15  (start only) the running daemon will stop itself when idle\n";
+}
+
+void print_start_usage(std::ostream& out) {
+  out << "Usage: holderctl start [options]\n"
+      << "\n"
+      << "Start a Holder daemon that keeps running until it is stopped, or check that the one\n"
+      << "already running will. It is `holderctl ensure` without --idle-exit, and it refuses a\n"
+      << "running daemon that was started to stop itself when idle (exit code 15), since that one\n"
+      << "would not stay. Use `holderctl ensure --idle-exit SECONDS` for a daemon that should go\n"
+      << "away when its client does.\n"
+      << "\n"
+      << "Options are those of `holderctl ensure` except --idle-exit; see `holderctl ensure --help`.\n";
 }
 
 } // namespace
@@ -253,7 +271,8 @@ std::optional<std::vector<unsigned long>> parse_api_version(const std::string& t
   std::string::size_type start = 0;
   for (;;) {
     const auto dot = text.find('.', start);
-    const auto piece = text.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
+    const auto piece =
+        text.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
     if (piece.empty() || piece.size() > 9) return std::nullopt;
     if (!std::all_of(piece.begin(), piece.end(), [](char ch) {
           return std::isdigit(static_cast<unsigned char>(ch)) != 0;
@@ -278,7 +297,10 @@ int compare_api_versions(const std::vector<unsigned long>& a, const std::vector<
   return 0;
 }
 
-ApiCompatibility check_api_compatibility(const std::string& daemon_api_version, const ApiRange& range) {
+ApiCompatibility check_api_compatibility(
+    const std::string& daemon_api_version,
+    const ApiRange& range
+) {
   if (range.minimum.empty() && range.maximum_exclusive.empty()) return {true, ""};
 
   const auto actual = parse_api_version(daemon_api_version);
@@ -407,6 +429,17 @@ EnsureResult ensure_daemon(const holder::core::Paths& paths, const EnsureOptions
     if (!compatibility.compatible) {
       return fail("api_incompatible", kEnsureExitApiIncompatible, compatibility.reason);
     }
+    if (options.keep_running && probe.idle_exit_seconds > 0) {
+      return fail(
+          "ephemeral",
+          kEnsureExitEphemeral,
+          "the running daemon (pid " + std::to_string(probe.pid) +
+              ") was started with --idle-exit and stops itself after " +
+              std::to_string(probe.idle_exit_seconds) +
+              " seconds without a client; stop it, then run start again to get one that stays "
+              "running"
+      );
+    }
     result.ok = true;
     result.state = state;
     result.mode = mode;
@@ -436,9 +469,8 @@ EnsureResult ensure_daemon(const holder::core::Paths& paths, const EnsureOptions
       return fail(
           "daemon_not_found",
           kEnsureExitDaemonNotFound,
-          options.daemon_path.empty()
-              ? "holderd was not found beside holderctl or on PATH"
-              : "holderd was not found at " + options.daemon_path.string()
+          options.daemon_path.empty() ? "holderd was not found beside holderctl or on PATH"
+                                      : "holderd was not found at " + options.daemon_path.string()
       );
     }
     holder::platform::DetachedProcessRequest request;
@@ -449,8 +481,8 @@ EnsureResult ensure_daemon(const holder::core::Paths& paths, const EnsureOptions
       request.args.push_back(std::to_string(*options.idle_exit_seconds));
       result.idle_exit_seconds = *options.idle_exit_seconds;
     }
-    request.working_dir =
-        options.working_dir.empty() ? default_working_dir(daemon) : options.working_dir;
+    request.working_dir = options.working_dir.empty() ? default_working_dir(daemon)
+                                                      : options.working_dir;
     request.log_path = log_path;
     result.log_path = log_path.string();
     std::string error;
@@ -464,11 +496,8 @@ EnsureResult ensure_daemon(const holder::core::Paths& paths, const EnsureOptions
     if (systemctl.empty()) {
       return fail("start_failed", kEnsureExitStartFailed, "systemctl was not found");
     }
-    const auto code = run_to_completion(
-        systemctl,
-        {"--user", "start", kServiceUnit},
-        std::chrono::seconds(30)
-    );
+    const auto code =
+        run_to_completion(systemctl, {"--user", "start", kServiceUnit}, std::chrono::seconds(30));
     if (!code.has_value() || *code != 0) {
       return fail(
           "start_failed",
@@ -509,7 +538,8 @@ EnsureResult ensure_daemon(const holder::core::Paths& paths, const EnsureOptions
     }
 
 #if defined(__linux__)
-    if (mode == EnsureMode::Service && Clock::now() - last_service_check >= std::chrono::seconds(1)) {
+    if (mode == EnsureMode::Service &&
+        Clock::now() - last_service_check >= std::chrono::seconds(1)) {
       last_service_check = Clock::now();
       if (service_unit_failed()) {
         return fail(
@@ -550,17 +580,30 @@ nlohmann::json ensure_result_to_json(const EnsureResult& result) {
   return out;
 }
 
-int command_ensure(const holder::core::Paths& paths, int argc, char* argv[]) {
+namespace {
+
+int run_ensure_command(const holder::core::Paths& paths, int argc, char* argv[], bool start) {
   for (int i = 2; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--help" || arg == "-h") {
-      print_ensure_usage(std::cout);
+      if (start) {
+        print_start_usage(std::cout);
+      } else {
+        print_ensure_usage(std::cout);
+      }
       return 0;
+    }
+    if (start && (arg == "--idle-exit" || arg.rfind("--idle-exit=", 0) == 0)) {
+      usage_error(
+          "holderctl start keeps the daemon running; use 'holderctl ensure --idle-exit SECONDS' for "
+          "one that stops itself"
+      );
     }
   }
 
   const bool json_output = json_output_requested(argc, argv);
   auto options = parse_ensure_options(argc, argv);
+  options.keep_running = start;
   options.holderctl_path = holder::platform::current_executable_path();
   if (options.holderctl_path.empty() && argc > 0 && argv[0] != nullptr && *argv[0] != '\0') {
     std::error_code ec;
@@ -579,12 +622,27 @@ int command_ensure(const holder::core::Paths& paths, int argc, char* argv[]) {
     std::cout << "URL: " << result.daemon.value("url", "") << "\n"
               << "API version: " << result.daemon.value("api_version", "") << "\n"
               << "Server version: " << result.daemon.value("server_version", "") << "\n";
+    if (start) {
+      std::cout << "PID: " << result.daemon.value("pid", 0) << "\n"
+                << "The daemon stays running until it is stopped (end process "
+                << result.daemon.value("pid", 0) << ").\n";
+    }
     return 0;
   }
 
   std::cerr << "Holder daemon: failed (" << result.error_code << "): " << result.message << "\n";
   if (!result.log_path.empty()) std::cerr << "Log: " << result.log_path << "\n";
   return result.exit_code;
+}
+
+} // namespace
+
+int command_ensure(const holder::core::Paths& paths, int argc, char* argv[]) {
+  return run_ensure_command(paths, argc, argv, false);
+}
+
+int command_start(const holder::core::Paths& paths, int argc, char* argv[]) {
+  return run_ensure_command(paths, argc, argv, true);
 }
 
 } // namespace holder::cli

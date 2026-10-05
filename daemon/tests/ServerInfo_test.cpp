@@ -171,3 +171,28 @@ TEST_CASE("write_server_info throws when fallback rename still fails", "[serveri
 
   REQUIRE_THROWS(holder::core::write_server_info(info_path, info));
 }
+
+TEST_CASE("write_server_info records an idle exit only when there is one", "[serverinfo]") {
+  const auto dir = make_temp_dir();
+  const auto info_path = dir / "holder.json";
+
+  holder::core::ServerInfo info;
+  info.pid = 42;
+  info.auth_token = "deadbeef";
+  holder::core::write_server_info(info_path, info);
+  {
+    std::ifstream in(info_path);
+    nlohmann::json j;
+    in >> j;
+    REQUIRE_FALSE(j.contains("idle_exit_seconds"));
+  }
+
+  info.idle_exit_seconds = 60;
+  holder::core::write_server_info(info_path, info);
+  {
+    std::ifstream in(info_path);
+    nlohmann::json j;
+    in >> j;
+    REQUIRE(j["idle_exit_seconds"] == 60);
+  }
+}

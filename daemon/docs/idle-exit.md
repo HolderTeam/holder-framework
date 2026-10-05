@@ -40,6 +40,13 @@ finishes starting, so the process that started it has `SECONDS` to connect.
 - **The local model runner's status probe**, which only polls.
 - **A connection that was accepted but has sent no request.**
 
+## Telling whether a daemon will stop
+
+A daemon started with `--idle-exit` records the period as `idle_exit_seconds` in its info file
+(`holder.json`); a daemon that stays running leaves the field out. `holderctl status` prints it,
+`holderctl ensure --json` reports it as `daemon.idle_exit_seconds`, and `holderctl start` uses it to
+refuse a running daemon that would not stay (exit status 15; see [ensure.md](ensure.md)).
+
 ## The final push
 
 When the daemon finds itself idle, and before it stops, it pushes every project that has

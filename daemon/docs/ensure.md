@@ -33,6 +33,23 @@ output and error are appended to `holderd-start.log` in the Holder cache directo
 stop one you started with `SIGTERM` (the PID is in the result). To have a spawned daemon stop
 by itself when it is no longer used, pass `--idle-exit SECONDS` (see [idle-exit.md](idle-exit.md)).
 
+## `holderctl start`: a daemon that stays
+
+`holderctl start` is for a person, or a script, that wants a daemon running and staying running: it
+is `ensure` without `--idle-exit`, and it takes the same options except that one. A daemon it starts
+runs until it is stopped; the output says so and names the process to end.
+
+It differs from `ensure` in one case. If the daemon already running was started to stop itself when
+idle (by a client that used `ensure --idle-exit`, such as the desktop app), `start` does not claim
+success: it exits with status 15 and error code `ephemeral`, leaves that daemon alone, and says how
+long it will wait before stopping. Stop that daemon and run `start` again to get one that stays. (`ensure`
+itself accepts such a daemon, because a client that asked for one only needs it to be running now.)
+
+```sh
+holderctl start             # human-readable
+holderctl start --json      # the same JSON as ensure, plus exit status 15 above
+```
+
 ## Options
 
 | Option | Meaning |
@@ -113,7 +130,8 @@ Failure:
 | `mode` | `existing`, `service` or `spawned`. Absent on failure when nothing was started. |
 | `daemon` | The daemon that was found or started. Also present when it is running but incompatible. |
 | `spawned_pid` | The `holderd` this call started, if any, including when it never became healthy. |
-| `idle_exit_seconds` | Present when the spawned daemon was started with `--idle-exit`. |
+| `idle_exit_seconds` | Present when this call started the daemon with `--idle-exit`. |
+| `daemon.idle_exit_seconds` | Present when the daemon, however it was started, will stop itself after this many seconds without activity. Absent for a daemon that stays running. |
 | `log` | The start log, when a daemon was spawned. |
 | `error` | `code` and a human-readable `message`, on failure only. |
 
@@ -128,6 +146,7 @@ Failure:
 | 12 | `start_failed` | The daemon could not be started, or exited before becoming healthy. |
 | 13 | `timeout` | A started daemon did not become healthy in time. It is left running; `spawned_pid` identifies it. |
 | 14 | `daemon_not_found` | No `holderd` was found. |
+| 15 | `ephemeral` | `holderctl start` only: the running daemon was started with `--idle-exit` and will stop itself. It is left running. |
 
 ## Notes for client authors
 

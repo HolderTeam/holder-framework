@@ -8,6 +8,7 @@ int command_token(const holder::core::Paths& paths);
 int command_status(const holder::core::Paths& paths);
 int command_health(const holder::core::Paths& paths);
 int command_ensure(const holder::core::Paths& paths, int argc, char* argv[]);
+int command_start(const holder::core::Paths& paths, int argc, char* argv[]);
 int command_paths(const holder::core::Paths& paths);
 int command_openapi(const holder::core::Paths& paths, int argc, char* argv[]);
 int command_restart();
