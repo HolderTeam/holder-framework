@@ -4,13 +4,13 @@ on:
   pull_request:
     paths:
       - 'python/**'
-      - 'daemon/openapi.yaml'
+      - 'api/openapi.yaml'
       - '.github/workflows/python-check.yml'
   push:
     branches: [main]
     paths:
       - 'python/**'
-      - 'daemon/openapi.yaml'
+      - 'api/openapi.yaml'
       - '.github/workflows/python-check.yml'
   workflow_dispatch:
 

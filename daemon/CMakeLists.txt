@@ -22,10 +22,27 @@ else()
     "${HOLDER_VERSION_FILE} must contain a semantic version like 0.1.0 or 2.0.0-dev")
 endif()
 
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/API_VERSION" HOLDER_DAEMON_API_VERSION)
+# api/ (the HTTP contract: openapi.yaml and API_VERSION), cli/ (holderctl) and common/ (the platform
+# files holderd and holderctl share) live beside daemon/ in the framework repository. A Debian
+# source package is exported from daemon/ alone, so its workflow copies the three directories in;
+# the ones inside this directory are used when the ones next to it are out of reach.
+foreach(dir api cli common)
+  string(TOUPPER "${dir}" upper)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../${dir}")
+    set(HOLDER_${upper}_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../${dir}")
+  elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${dir}")
+    set(HOLDER_${upper}_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${dir}")
+  else()
+    message(FATAL_ERROR
+      "The ${dir}/ directory was not found next to or inside ${CMAKE_CURRENT_SOURCE_DIR}")
+  endif()
+endforeach()
+
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HOLDER_API_DIR}/API_VERSION")
+file(READ "${HOLDER_API_DIR}/API_VERSION" HOLDER_DAEMON_API_VERSION)
 string(STRIP "${HOLDER_DAEMON_API_VERSION}" HOLDER_DAEMON_API_VERSION)
 if(NOT HOLDER_DAEMON_API_VERSION MATCHES "^[0-9]+\\.[0-9]+$")
-  message(FATAL_ERROR "API_VERSION must contain a compatibility version like 0.1")
+  message(FATAL_ERROR "${HOLDER_API_DIR}/API_VERSION must contain a compatibility version like 0.1")
 endif()
 
 project(card_server VERSION "${HOLDER_DAEMON_CMAKE_VERSION}" LANGUAGES CXX)
@@ -86,22 +103,6 @@ if(HOLDER_USE_PKG_CONFIG_DEPS)
   find_package(PkgConfig REQUIRED)
 endif()
 find_package(OpenSSL REQUIRED)
-# holderctl (cli/) and the platform files holderd and holderctl share (common/) live beside daemon/
-# in the framework repository. A Debian source package is exported from daemon/ alone, so its
-# workflow copies both directories in; the ones inside this directory are used when the ones next
-# to it are out of reach.
-foreach(dir cli common)
-  string(TOUPPER "${dir}" upper)
-  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../${dir}")
-    set(HOLDER_${upper}_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../${dir}")
-  elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${dir}")
-    set(HOLDER_${upper}_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${dir}")
-  else()
-    message(FATAL_ERROR
-      "The ${dir}/ directory was not found next to or inside ${CMAKE_CURRENT_SOURCE_DIR}")
-  endif()
-endforeach()
-
 find_package(Threads REQUIRED)
 
 # Boost: Beast/Asio/System are header-only for our usage; Filesystem still
@@ -539,7 +540,7 @@ if(WIN32)
       "${CMAKE_CURRENT_SOURCE_DIR}/config/git_providers.yaml"
       "${CMAKE_CURRENT_BINARY_DIR}/config"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-      "${CMAKE_CURRENT_SOURCE_DIR}/openapi.yaml"
+      "${HOLDER_API_DIR}/openapi.yaml"
       "${CMAKE_CURRENT_BINARY_DIR}/openapi.yaml"
     COMMAND ${CMAKE_COMMAND} -E copy_directory
       "${CMAKE_CURRENT_SOURCE_DIR}/assets/swagger-ui"
@@ -623,7 +624,7 @@ install(FILES
   config/git_providers.yaml
   DESTINATION ${CMAKE_INSTALL_DATADIR}/holder-daemon/config
 )
-install(FILES openapi.yaml DESTINATION ${CMAKE_INSTALL_DATADIR}/holder-daemon)
+install(FILES ${HOLDER_API_DIR}/openapi.yaml DESTINATION ${CMAKE_INSTALL_DATADIR}/holder-daemon)
 install(DIRECTORY assets/swagger-ui DESTINATION ${CMAKE_INSTALL_DATADIR}/holder-daemon/assets)
 
 # ----------------------------

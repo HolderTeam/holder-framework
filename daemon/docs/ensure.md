@@ -13,7 +13,7 @@ holderctl ensure --json --api-min 0.1 --api-max-exclusive 1.0
 
 ## What it does
 
-1. Looks for a running daemon: the info file (`holder.json`, see [CLIENTS.md](CLIENTS.md)),
+1. Looks for a running daemon: the info file (`holder.json`, see [CLIENTS.md](../../api/docs/CLIENTS.md)),
    a live process, and a successful `GET /health`.
 2. If one is healthy, checks its API version against the range the caller supports. That
    decides the result; nothing is started or stopped.

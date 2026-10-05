@@ -9,6 +9,7 @@ on:
       - '.github/workflows/daemon-*.yml'
       - 'cli/**'
       - 'common/**'
+      - 'api/**'
   push:
     branches: [main]
     paths:
@@ -18,6 +19,7 @@ on:
       - '.github/workflows/daemon-*.yml'
       - 'cli/**'
       - 'common/**'
+      - 'api/**'
   workflow_dispatch:
     inputs:
       core_ref:

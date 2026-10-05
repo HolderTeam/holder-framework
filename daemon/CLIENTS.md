@@ -1,1 +1,1 @@
-Moved to `docs/CLIENTS.md`.
+Moved to [`api/docs/CLIENTS.md`](../api/docs/CLIENTS.md).

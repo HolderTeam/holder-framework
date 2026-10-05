@@ -18,5 +18,6 @@ Testing
 /config/WELCOME.md
 /schema/schema.sql
 # Copied here only while building the Debian source package (see ../.github/workflows/daemon-launchpad.yml).
+/api/
 /cli/
 /common/

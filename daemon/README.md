@@ -284,7 +284,7 @@ HOLDER_SAN_DETECT_LEAKS=1 ./make.sh san address,undefined
 
 The authenticated change feed and AI streams support asynchronous subscriptions
 with bounded output and explicit reconnect recovery. See
-[the event-stream contract](docs/event-streams.md) for snapshot synchronization,
+[the event-stream contract](../api/docs/event-streams.md) for snapshot synchronization,
 Git revisions, replay limits and client behavior.
 
 ## Starting the daemon from a client

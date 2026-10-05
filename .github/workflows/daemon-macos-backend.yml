@@ -99,12 +99,12 @@ jobs:
           cp -a "${build_dir}/schema" "${stage_dir}/"
           cp -a config "${stage_dir}/"
           cp -a assets "${stage_dir}/"
-          cp openapi.yaml "${stage_dir}/"
+          cp ../api/openapi.yaml "${stage_dir}/"
           cp "${build_dir}/core-build.json" "${stage_dir}/"
           mkdir -p "${stage_dir}/release"
           git rev-parse HEAD > "${stage_dir}/release/holder-daemon-commit.txt"
           tr -d '[:space:]' < ../VERSION > "${stage_dir}/release/holder-daemon-version.txt"
-          tr -d '[:space:]' < API_VERSION > "${stage_dir}/release/holder-daemon-api-version.txt"
+          tr -d '[:space:]' < ../api/API_VERSION > "${stage_dir}/release/holder-daemon-api-version.txt"
 
           (
             cd "${stage_dir}"
