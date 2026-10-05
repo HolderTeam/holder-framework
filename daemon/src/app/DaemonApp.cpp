@@ -1,5 +1,5 @@
-#include "core/ActivityTracker.h"
 #include "app/DaemonApp.h"
+#include "core/ActivityTracker.h"
 
 #include "ai/AiNudgeDurability.h"
 #include "ai/AiProviderCredentialRecovery.h"
@@ -429,7 +429,10 @@ int run_daemon(int argc, char* argv[]) {
   std::atomic<bool> idle_monitor_stop_requested{false};
   std::thread idle_monitor_thread;
   if (idle_exit_seconds > 0) {
-    spdlog::info("idle exit enabled: stopping after {} seconds without activity.", idle_exit_seconds);
+    spdlog::info(
+        "idle exit enabled: stopping after {} seconds without activity.",
+        idle_exit_seconds
+    );
     holder::core::activity().touch();
     idle_monitor_thread = std::thread([&]() { // LCOV_EXCL_LINE: thread entry cleanup line.
       const auto quiet = std::chrono::seconds(idle_exit_seconds);
@@ -443,6 +446,17 @@ int run_daemon(int argc, char* argv[]) {
         if (open_streams < previous_streams) holder::core::activity().touch();
         previous_streams = open_streams;
         if (!holder::core::activity().idle(quiet, open_streams)) continue;
+
+        // Anything committed but not yet pushed goes out before the daemon stops. The push is
+        // not counted as activity, so if nothing used the daemon in the meantime it stops
+        // right after, and if something did, it carries on.
+        try {
+          sync_worker.run_final_push();
+        } catch (const std::exception& ex) {
+          spdlog::warn("final push before exiting failed: {}", ex.what());
+        }
+        if (!holder::core::activity().idle(quiet, server.open_stream_count())) continue;
+
         spdlog::info(
             "idle for {} seconds with no requests, event streams or background work; exiting.",
             idle_exit_seconds

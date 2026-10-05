@@ -1,5 +1,5 @@
-#include "core/ActivityTracker.h"
 #include "sync/ProjectSyncWorker.h"
+#include "core/ActivityTracker.h"
 
 #include "git/GitOps.h"
 #include "git/RepoSyncMetrics.h"
@@ -10,6 +10,7 @@
 #include "sync/ProjectSyncOperation.h"
 #include "sync/ProjectSyncPolicy.h"
 
+#include <git2.h>
 #include <spdlog/spdlog.h>
 
 #include <atomic>
@@ -32,6 +33,29 @@ holder::project::ProjectSyncActivityUpdate activity_update_from_metrics(
       .unpushed_commits_count = metrics.unpushed_commits_count,
       .updated_at = now
   };
+}
+
+// True when the repository's current branch has a remote-tracking ref for `remote`. Without one
+// the unpushed-commit count is unknown rather than zero, so a final push cannot rely on it.
+bool has_remote_tracking_ref(const std::filesystem::path& repo_dir, const std::string& remote) {
+  git_libgit2_init();
+  bool found = false;
+  git_repository* repo = nullptr;
+  git_reference* head = nullptr;
+  git_reference* tracking = nullptr;
+  if (git_repository_open(&repo, repo_dir.string().c_str()) == 0 &&
+      git_repository_head(&head, repo) == 0) {
+    const char* branch = nullptr;
+    if (git_branch_name(&branch, head) == 0 && branch != nullptr) {
+      const std::string name = "refs/remotes/" + remote + "/" + branch;
+      found = git_reference_lookup(&tracking, repo, name.c_str()) == 0;
+    }
+  }
+  if (tracking != nullptr) git_reference_free(tracking);
+  if (head != nullptr) git_reference_free(head);
+  if (repo != nullptr) git_repository_free(repo);
+  git_libgit2_shutdown();
+  return found;
 }
 
 } // namespace
@@ -151,7 +175,10 @@ void ProjectSyncWorker::run_startup_pull_pass() {
   }
 }
 
-void ProjectSyncWorker::run_push_cycle() {
+int ProjectSyncWorker::run_final_push() { return run_push_cycle(true); }
+
+int ProjectSyncWorker::run_push_cycle(bool final_push) {
+  int pushes_attempted = 0;
   holder::platform::Db db;
   db.open(db_path_);
   holder::index::FtsIndexer fts(db);
@@ -164,12 +191,16 @@ void ProjectSyncWorker::run_push_cycle() {
     if (!project.git_remote_url.has_value() || project.git_remote_url->empty()) {
       continue;
     }
+    int unpushed_commits = 0;
+    bool push_state_known = false;
     {
       auto operation = git.lock_operation(project.root_path);
       try {
         git.open_or_init(project.root_path);
         git.set_remote("origin", project.git_remote_url.value());
         const auto metrics = holder::git::inspect_repo_sync_metrics(project.root_path, "origin");
+        unpushed_commits = metrics.unpushed_commits_count;
+        push_state_known = final_push && has_remote_tracking_ref(project.root_path, "origin");
         sync.update_activity_counts(project.project_id, activity_update_from_metrics(metrics, now));
       } catch (const std::exception& ex) {
         // LCOV_EXCL_START: exercised failure path; spdlog compiles to an uncovered inline guard.
@@ -184,22 +215,38 @@ void ProjectSyncWorker::run_push_cycle() {
     }
 
     const auto state = sync.get(project.project_id);
-    const bool pull_due = should_attempt_pull( // LCOV_EXCL_LINE: aggregate initializer bookkeeping.
-        {.last_pull_at = state.has_value() ? state->last_pull_at : std::optional<long long>{},
-         .next_pull_retry_at = state.has_value() ? state->next_pull_retry_at
-                                                 : std::optional<long long>{},
-         .now = now,
-         .pull_interval_seconds = pull_interval_seconds_}
-    );
-    const bool push_due = should_attempt_push( // LCOV_EXCL_LINE: aggregate initializer bookkeeping.
-        {.last_push_at = state.has_value() ? state->last_push_at : std::optional<long long>{},
-         .next_retry_at = state.has_value() ? state->next_retry_at : std::optional<long long>{},
-         .now = now,
-         .push_interval_seconds = push_interval_seconds_}
-    );
+    const bool pull_due = !final_push &&
+                          should_attempt_pull( // LCOV_EXCL_LINE: aggregate initializer bookkeeping.
+                              {.last_pull_at = state.has_value() ? state->last_pull_at
+                                                                 : std::optional<long long>{},
+                               .next_pull_retry_at = state.has_value() ? state->next_pull_retry_at
+                                                                       : std::optional<long long>{},
+                               .now = now,
+                               .pull_interval_seconds = pull_interval_seconds_}
+                          );
+    // A final push ignores the interval, since the daemon is about to stop, but not the back-off
+    // after a failed push. It skips a project only when the count of unpushed commits is known
+    // and zero; with no remote-tracking ref the count says nothing, so the push decides.
+    const bool push_due =
+        (!final_push || unpushed_commits > 0 || !push_state_known) &&
+        should_attempt_push( // LCOV_EXCL_LINE: aggregate initializer bookkeeping.
+            {.last_push_at = state.has_value() ? state->last_push_at : std::optional<long long>{},
+             .next_retry_at = state.has_value() ? state->next_retry_at : std::optional<long long>{},
+             .now = now,
+             .push_interval_seconds = final_push ? 0 : push_interval_seconds_}
+        );
     if (!pull_due && !push_due) continue;
 
-    (void)holder::sync::run_project_sync(
+    if (final_push) {
+      spdlog::info(
+          "final push: pushing project {} before exiting ({} unpushed commit(s) known).",
+          project.project_id,
+          unpushed_commits
+      );
+    }
+    if (push_due) ++pushes_attempted;
+
+    const auto sync_result = holder::sync::run_project_sync(
         db,
         &fts,
         git,
@@ -211,6 +258,21 @@ void ProjectSyncWorker::run_push_cycle() {
          .set_upstream = true,
          .now = now}
     );
+
+    if (final_push && push_due) {
+      const auto status = sync_result.push.status;
+      if (status == holder::git::PushStatus::Pushed ||
+          status == holder::git::PushStatus::UpToDate) {
+        spdlog::info("final push of project {} done.", project.project_id);
+      } else {
+        spdlog::warn(
+            "final push of project {} did not complete ({}): {}. The commits stay local and will be pushed on the next run.",
+            project.project_id,
+            holder::git::push_status_name(status),
+            sync_result.push.error_message.value_or("no details")
+        );
+      }
+    }
 
     if (pull_due) {
       try {
@@ -249,6 +311,7 @@ void ProjectSyncWorker::run_push_cycle() {
       // LCOV_EXCL_STOP
     }
   }
+  return pushes_attempted;
 }
 
 } // namespace holder::sync

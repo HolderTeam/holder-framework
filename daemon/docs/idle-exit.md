@@ -33,17 +33,32 @@ finishes starting, so the process that started it has `SECONDS` to connect.
 
 ## What does not keep it running
 
-- **Scheduled sync that is not running.** The sync worker wakes every 30 seconds but pushes
-  only every 20 minutes and pulls every 5. A daemon that lives for less than that may stop
-  before the next scheduled push. Nothing is lost: the commits stay local and the next start
-  syncs them. A sync that is running when the quiet period would end finishes first.
+- **Scheduled sync that is not running.** The sync worker pushes only every 20 minutes and
+  pulls every 5, so a short-lived daemon may never reach its next scheduled push. That is
+  covered by the final push below, rather than by keeping the daemon alive. A sync that is
+  running when the quiet period would end finishes first.
 - **The local model runner's status probe**, which only polls.
 - **A connection that was accepted but has sent no request.**
 
+## The final push
+
+When the daemon finds itself idle, and before it stops, it pushes every project that has
+commits not yet pushed to its remote. This ignores the usual 20-minute push interval, since
+there will be no later chance. It does not pull.
+
+- A project is skipped if it has no remote, or if its count of unpushed commits is known and
+  zero. When the count is not known (the repository has no remote-tracking branch yet) the
+  push is attempted, and the remote answers.
+- It respects the back-off after a failed push, so a machine that is offline is not held up
+  retrying. If a push fails the commits stay local, a warning is logged, and the next run
+  pushes them.
+- The push does not count as activity. If nothing used the daemon in the meantime it stops
+  straight after; if a request arrived while it was pushing, it carries on running.
+
 ## How it stops
 
-It takes the same graceful path as `SIGTERM`: it stops accepting connections, background
-workers finish what they are doing, and it exits with status 0. The log says
+It takes the same graceful path as `SIGTERM`, after the final push: it stops accepting
+connections, background workers finish what they are doing, and it exits with status 0. The log says
 `idle for N seconds with no requests, event streams or background work; exiting.`
 
 The info file (`holder.json`) is left behind, as it is after any exit. Clients detect that
