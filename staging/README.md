@@ -116,9 +116,14 @@ The AppDir and final AppImage retain daemon's original `core-build.json` and
 the same core selection. A supplied framework release manifest is bundled in
 `usr/share/holder/release/holder-framework-release.json`.
 
-The AppImage launcher uses an already-running compatible Holder daemon when one
-is available. Otherwise it starts the bundled daemon, waits for it to become
-healthy, and stops that process when the desktop exits.
+`AppRun` sets up the bundled runtime (library, GTK and schema paths) and starts the
+desktop. The desktop starts its own backend with `holderctl ensure` (the one in the
+AppImage's `usr/bin`): it uses an already-running compatible daemon when there is one,
+and otherwise starts the bundled `holderd` with `--idle-exit 60`, so the daemon stops
+by itself shortly after the window closes. `AppRun` no longer owns or stops a daemon. With
+`HOLDER_APPRUN_SMOKE_TEST=1` it starts the bundled daemon the same way, checks it is healthy
+within the API range the desktop was built for, stops the daemon it started and exits (CI and
+the release verification use this).
 
 ## Mac
 
