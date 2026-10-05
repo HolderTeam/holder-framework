@@ -20,6 +20,7 @@ Download Holder for Windows, macOS or Linux from [holder.team](https://holder.te
 
 - [`launcher/`](launcher/) - the launcher that starts the Holder backend and opens the desktop app.
 - [`staging/`](staging/) - assembles and checks build artifacts for each platform.
+- [`python/`](python/) - an experimental Python client for the Holder daemon's HTTP API.
 - [`release/`](release/) - signing, verification and publishing of releases.
 
 ## Licence
