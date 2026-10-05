@@ -38,6 +38,65 @@ std::vector<unsigned long> version(const std::string& text) {
 
 } // namespace
 
+namespace {
+
+std::filesystem::path make_dirs(const std::filesystem::path& path) {
+  std::filesystem::create_directories(path);
+  return path;
+}
+
+} // namespace
+
+TEST_CASE("the daemon starts beside its binary when nothing says otherwise", "[ensure][workdir]") {
+  const auto root = holder::test::make_temp_dir();
+  make_dirs(root / "build");
+  REQUIRE(holder::cli::default_daemon_working_dir(root / "build" / "holderd") == root / "build");
+}
+
+TEST_CASE("an installed layout starts the daemon in share/holder-daemon", "[ensure][workdir]") {
+  const auto root = holder::test::make_temp_dir();
+  make_dirs(root / "bin");
+  make_dirs(root / "share" / "holder-daemon");
+  REQUIRE(
+      holder::cli::default_daemon_working_dir(root / "bin" / "holderd") ==
+      root / "share" / "holder-daemon"
+  );
+}
+
+TEST_CASE("a macOS app bundle starts the daemon in Contents/Resources", "[ensure][workdir]") {
+  const auto root = holder::test::make_temp_dir();
+  const auto resources = root / "Holder.app" / "Contents" / "Resources";
+  make_dirs(resources / "bin");
+  make_dirs(resources / "schema");
+  make_dirs(resources / "config");
+  REQUIRE(holder::cli::default_daemon_working_dir(resources / "bin" / "holderd") == resources);
+}
+
+TEST_CASE("only a real app bundle counts as one", "[ensure][workdir]") {
+  // A development tree has schema/ and config/ one level up from build/ too; it must keep
+  // starting the daemon in build/.
+  const auto root = holder::test::make_temp_dir();
+  make_dirs(root / "daemon" / "build");
+  make_dirs(root / "daemon" / "schema");
+  make_dirs(root / "daemon" / "config");
+  REQUIRE(
+      holder::cli::default_daemon_working_dir(root / "daemon" / "build" / "holderd") ==
+      root / "daemon" / "build"
+  );
+
+  // A Resources directory outside Contents, or a bundle without the daemon's data, is not one.
+  make_dirs(root / "Resources" / "bin");
+  make_dirs(root / "Resources" / "schema");
+  make_dirs(root / "Resources" / "config");
+  REQUIRE(
+      holder::cli::default_daemon_working_dir(root / "Resources" / "bin" / "holderd") ==
+      root / "Resources" / "bin"
+  );
+  const auto bare = root / "Bare.app" / "Contents" / "Resources";
+  make_dirs(bare / "bin");
+  REQUIRE(holder::cli::default_daemon_working_dir(bare / "bin" / "holderd") == bare / "bin");
+}
+
 TEST_CASE("ensure parses dotted API versions", "[ensure]") {
   REQUIRE(parse_api_version("0.1") == std::optional<std::vector<unsigned long>>({0, 1}));
   REQUIRE(parse_api_version("1") == std::optional<std::vector<unsigned long>>({1}));
