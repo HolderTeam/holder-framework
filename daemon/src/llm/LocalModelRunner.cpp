@@ -1,3 +1,4 @@
+#include "core/ActivityTracker.h"
 #include "llm/LocalModelRunner.h"
 
 #include <spdlog/spdlog.h>
@@ -214,9 +215,12 @@ LocalModelRunner::PullJob LocalModelRunner::start_pull(const std::string& model)
   }
 
   std::lock_guard<std::mutex> lock(pull_threads_mu_);
-  pull_threads_.emplace_back([this, job_id = job.job_id, model]() {
-    run_pull(job_id, model);
-  });
+  // A model download outlives the request that started it; it is work until it finishes.
+  pull_threads_.emplace_back(
+      [this, job_id = job.job_id, model, activity_scope = holder::core::activity().begin()]() {
+        run_pull(job_id, model);
+      }
+  );
   return job;
 }
 

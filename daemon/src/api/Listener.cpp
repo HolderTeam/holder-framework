@@ -2,6 +2,7 @@
 #include "api/routes/AiResourceRoutes.h"
 
 #include "api/support/HttpResponses.h"
+#include "core/ActivityTracker.h"
 
 #include <boost/beast/http.hpp>
 #include <memory>
@@ -406,6 +407,16 @@ std::size_t Listener::pending_socket_count() const {
   return pending_sockets_.size();
 }
 
+std::size_t Listener::open_stream_count() {
+  std::shared_ptr<holder::api::support::EventService> events;
+  {
+    std::lock_guard<std::mutex> lock(event_service_mutex_);
+    events = events_;
+  }
+  const auto streams = events ? events->streams() : nullptr;
+  return streams ? streams->open_count() : 0;
+}
+
 std::size_t Listener::save_queue_count() const {
   std::lock_guard<std::mutex> lock(lane_queue_mutex_);
   return save_queue_.size();
@@ -437,6 +448,7 @@ void Listener::start_accept_loop() {
   }
 
   acceptor_.async_accept([this](boost::system::error_code ec, tcp::socket socket) mutable {
+    if (!ec) holder::core::activity().touch();
     if (ec) {
       if (stop_requested_.load() || ec == boost::asio::error::operation_aborted ||
           ec == boost::asio::error::bad_descriptor) {
@@ -589,6 +601,9 @@ void Listener::run_save_worker() {
       save_queue_.pop_front();
     }
 
+    // Executing the request is work: keep the daemon from going idle until it is done.
+    const auto activity_scope = holder::core::activity().begin();
+
     Session session(
         std::move(prepared),
         context.db,
@@ -653,6 +668,9 @@ void Listener::run_general_worker() {
       }
     }
 
+    // Executing the request (including a streaming AI run) is work.
+    const auto activity_scope = holder::core::activity().begin();
+
     if (should_drop_stale_background_request(prepared)) {
       spdlog::info( // LCOV_EXCL_LINE: spdlog macro expansion retains an unexecuted duplicate.
           "dropping stale background request before execution: lane={} target={}",
@@ -712,6 +730,7 @@ void Listener::run_writer_worker() {
       prepared = std::move(response_queue_.front());
       response_queue_.pop_front();
     }
+    const auto activity_scope = holder::core::activity().begin();
     Session::write_prepared_response(
         std::move(prepared),
         [this](const Session::IoHandlePtr& active) {

@@ -1,3 +1,4 @@
+#include "core/ActivityTracker.h"
 #include "sync/ProjectSyncWorker.h"
 
 #include "git/GitOps.h"
@@ -45,17 +46,24 @@ ProjectSyncWorker::ProjectSyncWorker(
       poll_interval_seconds_(intervals.poll_interval_seconds) {}
 
 void ProjectSyncWorker::run(const holder::core::SignalHandler& signals) {
-  try {
-    run_startup_pull_pass();
-  } catch (const std::exception& ex) {
-    spdlog::warn("sync worker startup pull pass failed: {}", ex.what());
+  {
+    // Syncing is work: a daemon started with --idle-exit must not stop in the middle of it.
+    const auto activity_scope = holder::core::activity().begin();
+    try {
+      run_startup_pull_pass();
+    } catch (const std::exception& ex) {
+      spdlog::warn("sync worker startup pull pass failed: {}", ex.what());
+    }
   }
 
   while (!signals.is_requested()) {
-    try {
-      run_push_cycle();
-    } catch (const std::exception& ex) {
-      spdlog::warn("sync worker push cycle failed: {}", ex.what());
+    {
+      const auto activity_scope = holder::core::activity().begin();
+      try {
+        run_push_cycle();
+      } catch (const std::exception& ex) {
+        spdlog::warn("sync worker push cycle failed: {}", ex.what());
+      }
     }
 
     int slept = 0;

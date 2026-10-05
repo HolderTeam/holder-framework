@@ -45,6 +45,8 @@ class HttpServer {
   BoundInfo start();
   void run(const holder::core::SignalHandler& signals);
   void stop();
+  // Open event streams; the daemon counts clients that are subscribed as present.
+  std::size_t open_stream_count();
 
  private:
   std::string bind_;
