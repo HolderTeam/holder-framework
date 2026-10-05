@@ -457,10 +457,18 @@ int run_daemon(int argc, char* argv[]) {
         }
         if (!holder::core::activity().idle(quiet, server.open_stream_count())) continue;
 
-        spdlog::info(
-            "idle for {} seconds with no requests, event streams or background work; exiting.",
-            idle_exit_seconds
-        );
+        if (holder::core::activity().goodbye_pending()) {
+          spdlog::info(
+              "a client said goodbye and nothing has happened since; exiting without waiting "
+              "the full {} seconds.",
+              idle_exit_seconds
+          );
+        } else {
+          spdlog::info(
+              "idle for {} seconds with no requests, event streams or background work; exiting.",
+              idle_exit_seconds
+          );
+        }
         signals.request_stop();
         server.stop();
         break;

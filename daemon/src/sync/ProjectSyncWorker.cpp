@@ -70,24 +70,20 @@ ProjectSyncWorker::ProjectSyncWorker(
       poll_interval_seconds_(intervals.poll_interval_seconds) {}
 
 void ProjectSyncWorker::run(const holder::core::SignalHandler& signals) {
-  {
-    // Syncing is work: a daemon started with --idle-exit must not stop in the middle of it.
-    const auto activity_scope = holder::core::activity().begin();
-    try {
-      run_startup_pull_pass();
-    } catch (const std::exception& ex) {
-      spdlog::warn("sync worker startup pull pass failed: {}", ex.what());
-    }
+  // Only syncing that is actually due counts as activity (see below). Waking up to find nothing
+  // to do must not, or a daemon started with --idle-exit could never be quiet for longer than
+  // the poll interval.
+  try {
+    run_startup_pull_pass();
+  } catch (const std::exception& ex) {
+    spdlog::warn("sync worker startup pull pass failed: {}", ex.what());
   }
 
   while (!signals.is_requested()) {
-    {
-      const auto activity_scope = holder::core::activity().begin();
-      try {
-        run_push_cycle();
-      } catch (const std::exception& ex) {
-        spdlog::warn("sync worker push cycle failed: {}", ex.what());
-      }
+    try {
+      run_push_cycle();
+    } catch (const std::exception& ex) {
+      spdlog::warn("sync worker push cycle failed: {}", ex.what());
     }
 
     int slept = 0;
@@ -147,6 +143,8 @@ void ProjectSyncWorker::run_startup_pull_pass() {
     if (current.has_value() && current->last_pull_at.has_value()) {
       continue;
     }
+    // A daemon started with --idle-exit must not stop in the middle of a sync.
+    const auto activity_scope = holder::core::activity().begin();
     (void)holder::sync::run_project_sync(
         db,
         &fts,
@@ -236,6 +234,10 @@ int ProjectSyncWorker::run_push_cycle(bool final_push) {
              .push_interval_seconds = final_push ? 0 : push_interval_seconds_}
         );
     if (!pull_due && !push_due) continue;
+
+    // Held until this project is done, so a daemon started with --idle-exit does not stop in the
+    // middle of a sync.
+    const auto activity_scope = holder::core::activity().begin();
 
     if (final_push) {
       spdlog::info(

@@ -21,8 +21,10 @@ The daemon is idle, and stops, only when **all** of these hold:
    inside its request, so it counts.
 2. No event stream is open: the change feed (`GET /events`) and the AI run and runner event
    streams. A client that stays subscribed is present for as long as it is subscribed.
-3. No background work is running: a sync pass (the pull when the daemon starts, or a push or
-   pull cycle), a local model download, or a resource import.
+3. No background work is running: a sync that is actually due (the pull when the daemon starts,
+   or a push or pull that has come round), a local model download, or a resource import. The
+   sync worker waking every 30 seconds to find nothing due is not work, so `SECONDS` can be
+   longer than that.
 4. Nothing has happened for `SECONDS`: no connection arrived, no request started or finished,
    no stream closed, no background work started or finished.
 
@@ -39,6 +41,31 @@ finishes starting, so the process that started it has `SECONDS` to connect.
   running when the quiet period would end finishes first.
 - **The local model runner's status probe**, which only polls.
 - **A connection that was accepted but has sent no request.**
+
+## Saying goodbye
+
+A client that is closing can tell the daemon with `POST /bye` (authenticated, no body, returns
+`{"ok":true}`). It is a hint, not a command. The daemon still waits for `SECONDS` of quiet in
+general, but once a client has said goodbye it waits only 3 seconds, and only while nothing else
+happens:
+
+- Running work and open event streams still keep it up, so a second client that stays
+  subscribed is never cut off by the first one leaving.
+- A new connection, or any request other than `/bye`, cancels the goodbye and the full period
+  applies again.
+- The goodbye request itself, and the stream closing right after it, count as the last activity,
+  so the 3 seconds start from the moment the client has gone.
+- A daemon started without `--idle-exit`, such as the systemd service, acknowledges it and
+  ignores it.
+
+Calling it is best effort. A client that crashes or loses the connection never says goodbye, and
+the daemon falls back to its idle period, so nothing depends on it being sent. A client that
+needs the daemon to keep running should hold an event stream open, which is what presence means;
+a script that only makes occasional requests can lose its daemon 3 seconds after another
+client's goodbye if it was not using it at the time.
+
+The log says `a client said goodbye and nothing has happened since; exiting…` in this case,
+instead of `idle for N seconds…`.
 
 ## The final push
 
