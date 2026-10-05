@@ -6,12 +6,16 @@ on:
       - 'daemon/**'
       - '.gitmodules'
       - '.github/workflows/daemon-*.yml'
+      - 'cli/**'
+      - 'common/**'
   push:
     branches: [main]
     paths:
       - 'daemon/**'
       - '.gitmodules'
       - '.github/workflows/daemon-*.yml'
+      - 'cli/**'
+      - 'common/**'
   workflow_dispatch:
     inputs:
       core_ref:

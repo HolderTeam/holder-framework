@@ -1,5 +1,5 @@
-#include "cli/commands/Commands.h"
-#include "cli/commands/Common.h"
+#include "commands/Commands.h"
+#include "commands/Common.h"
 #include "platform/Paths.h"
 
 #include <iostream>

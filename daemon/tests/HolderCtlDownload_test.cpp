@@ -1,4 +1,4 @@
-#include "cli/commands/Download.h"
+#include "commands/Download.h"
 #include "http_test_helpers.h"
 
 #include <algorithm>

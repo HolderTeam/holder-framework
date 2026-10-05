@@ -1,6 +1,6 @@
-#include "cli/commands/Commands.h"
+#include "commands/Commands.h"
 
-#include "cli/commands/Support.h"
+#include "commands/Support.h"
 
 #include <nlohmann/json.hpp>
 

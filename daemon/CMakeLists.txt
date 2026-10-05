@@ -77,6 +77,22 @@ if(HOLDER_USE_PKG_CONFIG_DEPS)
   find_package(PkgConfig REQUIRED)
 endif()
 find_package(OpenSSL REQUIRED)
+# holderctl (cli/) and the platform files holderd and holderctl share (common/) live beside daemon/
+# in the framework repository. A Debian source package is exported from daemon/ alone, so its
+# workflow copies both directories in; the ones inside this directory are used when the ones next
+# to it are out of reach.
+foreach(dir cli common)
+  string(TOUPPER "${dir}" upper)
+  if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../${dir}")
+    set(HOLDER_${upper}_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../${dir}")
+  elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/${dir}")
+    set(HOLDER_${upper}_DIR "${CMAKE_CURRENT_SOURCE_DIR}/${dir}")
+  else()
+    message(FATAL_ERROR
+      "The ${dir}/ directory was not found next to or inside ${CMAKE_CURRENT_SOURCE_DIR}")
+  endif()
+endforeach()
+
 find_package(Threads REQUIRED)
 
 # Boost: Beast/Asio/System are header-only for our usage; Filesystem still
@@ -318,9 +334,9 @@ add_executable(holderd
   src/app/Bootstrap.cpp
   src/app/Entrypoint.cpp
   src/app/FatalError.cpp
-  src/platform/BaseDir.cpp
+  ${HOLDER_COMMON_DIR}/src/platform/BaseDir.cpp
   src/platform/InstalledDataPath.cpp
-  src/platform/Paths.cpp
+  ${HOLDER_COMMON_DIR}/src/platform/Paths.cpp
   src/platform/DatabaseRecovery.cpp
   src/platform/DeviceConfigStore.cpp
   src/platform/ProjectRegistry.cpp
@@ -409,6 +425,7 @@ add_executable(holderd
 
 target_include_directories(holderd PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${HOLDER_COMMON_DIR}/src
 )
 
 target_compile_definitions(holderd PRIVATE
@@ -524,31 +541,33 @@ if(WIN32)
 endif()
 
 add_executable(holderctl
-  src/cli/holderctl.cpp
-  src/cli/commands/Common.cpp
-  src/cli/commands/Download.cpp
-  src/cli/commands/DaemonCommands.cpp
-  src/cli/commands/Ensure.cpp
-  src/cli/commands/MilestoneDateTime.cpp
-  src/cli/commands/Support.cpp
-  src/cli/commands/card.cpp
-  src/cli/commands/history.cpp
-  src/cli/commands/links.cpp
-  src/cli/commands/milestones.cpp
-  src/cli/commands/project.cpp
-  src/cli/commands/recovery.cpp
-  src/cli/commands/reindex.cpp
-  src/cli/commands/resource.cpp
-  src/cli/commands/sync.cpp
-  src/cli/commands/tags.cpp
-  src/cli/commands/trash.cpp
-  src/cli/commands/SystemCommands.cpp
-  src/platform/BaseDir.cpp
-  src/platform/DetachedProcess.cpp
-  src/platform/Paths.cpp
+  ${HOLDER_CLI_DIR}/src/holderctl.cpp
+  ${HOLDER_CLI_DIR}/src/commands/Common.cpp
+  ${HOLDER_CLI_DIR}/src/commands/Download.cpp
+  ${HOLDER_CLI_DIR}/src/commands/DaemonCommands.cpp
+  ${HOLDER_CLI_DIR}/src/commands/Ensure.cpp
+  ${HOLDER_CLI_DIR}/src/commands/MilestoneDateTime.cpp
+  ${HOLDER_CLI_DIR}/src/commands/Support.cpp
+  ${HOLDER_CLI_DIR}/src/commands/card.cpp
+  ${HOLDER_CLI_DIR}/src/commands/history.cpp
+  ${HOLDER_CLI_DIR}/src/commands/links.cpp
+  ${HOLDER_CLI_DIR}/src/commands/milestones.cpp
+  ${HOLDER_CLI_DIR}/src/commands/project.cpp
+  ${HOLDER_CLI_DIR}/src/commands/recovery.cpp
+  ${HOLDER_CLI_DIR}/src/commands/reindex.cpp
+  ${HOLDER_CLI_DIR}/src/commands/resource.cpp
+  ${HOLDER_CLI_DIR}/src/commands/sync.cpp
+  ${HOLDER_CLI_DIR}/src/commands/tags.cpp
+  ${HOLDER_CLI_DIR}/src/commands/trash.cpp
+  ${HOLDER_CLI_DIR}/src/commands/SystemCommands.cpp
+  ${HOLDER_COMMON_DIR}/src/platform/BaseDir.cpp
+  ${HOLDER_COMMON_DIR}/src/platform/DetachedProcess.cpp
+  ${HOLDER_COMMON_DIR}/src/platform/Paths.cpp
 )
 target_include_directories(holderctl PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
+  ${HOLDER_CLI_DIR}/src
+  ${HOLDER_COMMON_DIR}/src
 )
 target_compile_definitions(holderctl PRIVATE
   CARD_SERVER_VERSION="${HOLDER_DAEMON_VERSION}"

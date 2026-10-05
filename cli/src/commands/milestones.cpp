@@ -1,7 +1,7 @@
-#include "cli/commands/Commands.h"
+#include "commands/Commands.h"
 
-#include "cli/commands/MilestoneDateTime.h"
-#include "cli/commands/Support.h"
+#include "commands/MilestoneDateTime.h"
+#include "commands/Support.h"
 
 #include <boost/beast/http.hpp>
 #include <nlohmann/json.hpp>
