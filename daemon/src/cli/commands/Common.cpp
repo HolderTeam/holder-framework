@@ -52,6 +52,7 @@ void print_usage(std::ostream& out) {
       << "  token      Print the local daemon bearer token\n"
       << "  status     Print local daemon status\n"
       << "  health     Check daemon metadata, process state, token, and HTTP health\n"
+      << "  ensure     Make sure a compatible daemon is running, starting it if needed\n"
       << "  paths      Print Holder data/config/cache paths\n"
       << "  project    Manage projects; use 'project new <name>' to create one\n"
       << "  projects   List Holder projects; use --json for raw API output\n"
