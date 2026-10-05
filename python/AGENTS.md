@@ -9,7 +9,7 @@ Do not hand-edit generated files. Use `python scripts/generate.py` to regenerate
 and `python scripts/generate.py --check` to verify them.
 
 `openapi/openapi.yaml` is a verbatim snapshot of holder-daemon's contract.
-Fix contract errors in holder-daemon first (it lives in `daemon/` of the holder-framework
-repository), test there, then refresh the snapshot with
-`python scripts/generate.py --source ../holder-framework/daemon/openapi.yaml`.
+Fix contract errors in holder-daemon first (it lives in `daemon/` of this repository), test
+there, then refresh the snapshot with
+`python scripts/generate.py --source ../daemon/openapi.yaml`.
 Do not duplicate domain logic owned by the daemon or holder-core.
