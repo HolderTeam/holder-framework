@@ -72,7 +72,7 @@ python scripts/generate.py
 python scripts/generate.py --check
 
 # Refresh after changes have been tested in the contract's owning repository.
-python scripts/generate.py --source ../holder-daemon/openapi.yaml
+python scripts/generate.py --source ../holder-framework/daemon/openapi.yaml
 ```
 
 The generator and Ruff versions are pinned in `pyproject.toml`. Generation runs

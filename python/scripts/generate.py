@@ -123,7 +123,7 @@ def main() -> int:
             provenance_path.write_text(
                 json.dumps(
                     {
-                        "source": "holder-daemon/openapi.yaml",
+                        "source": "holder-framework/daemon/openapi.yaml",
                         "revision": revision,
                         "schema_dirty": dirty,
                         "sha256": hashlib.sha256(data).hexdigest(),
