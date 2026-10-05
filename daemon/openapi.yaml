@@ -150,6 +150,13 @@ components:
           enum: [true]
         data:
           $ref: "#/components/schemas/HealthData"
+    ByeResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
     LocalModel:
       type: object
       required: [name]
@@ -2857,6 +2864,31 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+  /bye:
+    post:
+      summary: Say that this client is leaving
+      description: >-
+        A hint, never a command. A daemon started with `--idle-exit` normally waits out its whole
+        idle period after the last client has gone; after this request it waits only a few
+        seconds (3), and only while nothing else happens. Running work, an open event stream,
+        a new connection or any other request keeps it running, so another client is never cut
+        off by one client leaving. A daemon without `--idle-exit`, such as the systemd service,
+        ignores it. There is no request body, and nothing is returned beyond acknowledgement.
+        Clients call it best-effort as they close; a client that crashes simply never does, and
+        the daemon then falls back to its idle period.
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ByeResponse"
         "401":
           description: Unauthorized
           content:

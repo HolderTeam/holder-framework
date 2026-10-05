@@ -1,13 +1,15 @@
 cmake_minimum_required(VERSION 3.22)
 
-file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" HOLDER_LAUNCHER_VERSION)
+# The launcher is versioned with the rest of the framework: VERSION at the repository root.
+set(HOLDER_VERSION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../VERSION")
+file(READ "${HOLDER_VERSION_FILE}" HOLDER_LAUNCHER_VERSION)
 string(STRIP "${HOLDER_LAUNCHER_VERSION}" HOLDER_LAUNCHER_VERSION)
 if(NOT HOLDER_LAUNCHER_VERSION MATCHES "^[0-9]+\\.[0-9]+\\.[0-9]+$")
-  message(FATAL_ERROR "VERSION must contain a semantic version like 0.1.0")
+  message(FATAL_ERROR "${HOLDER_VERSION_FILE} must contain a semantic version like 0.1.0")
 endif()
 
 project(holder_launcher VERSION "${HOLDER_LAUNCHER_VERSION}" LANGUAGES CXX)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${HOLDER_VERSION_FILE}")
 include(CTest)
 
 if(WIN32)

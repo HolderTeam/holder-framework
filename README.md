@@ -26,6 +26,13 @@ Download Holder for Windows, macOS or Linux from [holder.team](https://holder.te
 - [`python/`](python/) - an experimental Python client for the Holder daemon's HTTP API.
 - [`release/`](release/) - signing, verification and publishing of releases.
 
+## Version
+
+Everything in this repository (the daemon, the launcher, the staging and release tooling and the Python client)
+has one version: the [`VERSION`](VERSION) file at the root. Change it there and nowhere else. The daemon's
+[`API_VERSION`](daemon/API_VERSION) is separate: it versions the HTTP contract that clients check, not the
+release. `holder-core` and the desktop app have their own versions.
+
 ## Licence
 
 Holder Framework is free software, licensed under the GNU General Public License, version 3. See [LICENSE](LICENSE).

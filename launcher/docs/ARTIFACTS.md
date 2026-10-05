@@ -1,6 +1,7 @@
 # Launcher build artifacts
 
-`VERSION` identifies the launcher component, not the assembled Holder product.
+The launcher takes its version from `VERSION` at the repository root, which is the version of the whole
+framework, not of the assembled Holder product (the desktop has its own).
 Windows file properties contain that version and the source commit; startup logs
 on both platforms include the source commit. Modified working trees are marked
 `-dirty`. Builds without Git information are marked `unknown-dirty`.

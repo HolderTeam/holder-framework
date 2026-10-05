@@ -12,6 +12,7 @@
 #include "project/Rebuilder.h"
 
 #include "GitRemoteTestSupport.h"
+#include "core/ActivityTracker.h"
 #include "http_test_helpers.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -758,3 +759,69 @@ TEST_CASE("a final push skips a project without a remote", "[sync][worker][final
   auto worker = worker_with_long_push_interval(db_path);
   REQUIRE(worker.run_final_push() == 0);
 }
+
+TEST_CASE(
+    "an idle sync worker polling does not count as activity",
+    "[sync][worker][activity]"
+) {
+  // Every poll wakes the worker, but with nothing due it does no work, and a daemon started with
+  // --idle-exit must still be able to go quiet. Otherwise an idle period longer than the poll
+  // interval could never be reached.
+  const auto dir = holder::test::make_temp_dir();
+  const auto db_path = dir / "holder.db";
+  const auto remote_dir = dir / "remote.git";
+  const auto local_dir = dir / "local_repo";
+  holder::test::init_bare_repo(remote_dir);
+  holder::git::GitRepo local_repo;
+  local_repo.open_or_init(local_dir);
+  local_repo.write_file("cards/a.md", "hello");
+  local_repo.stage_path("cards/a.md");
+  local_repo.commit("seed");
+  {
+    auto db = holder::test::open_db_with_schema(db_path);
+    holder::project::ProjectRepo projects(db);
+    holder::project::ProjectSyncRepo sync(db);
+    create_project(projects, "proj-quiet", local_dir, remote_dir.string(), "plain");
+    // A pull and a push have just happened, so neither is due for a long time.
+    sync.record_pull_result("proj-quiet", "succeeded", true, std::nullopt, now_epoch_seconds());
+    sync.record_push_result("proj-quiet", "pushed", true, std::nullopt, now_epoch_seconds());
+  }
+
+  holder::core::activity().touch();
+  run_worker_with_intervals_for_seconds(db_path, 2000000000, 2000000000, 1, 4);
+
+  // The worker woke several times in those four seconds, and none of them was activity.
+  REQUIRE(holder::core::activity().quiet_for() >= std::chrono::seconds(3));
+  REQUIRE(holder::core::activity().active() == 0);
+}
+
+TEST_CASE("sync work that is due does count as activity", "[sync][worker][activity]") {
+  const auto dir = holder::test::make_temp_dir();
+  const auto db_path = dir / "holder.db";
+  const auto remote_dir = dir / "remote.git";
+  const auto local_dir = dir / "local_repo";
+  holder::test::init_bare_repo(remote_dir);
+  holder::git::GitRepo local_repo;
+  local_repo.open_or_init(local_dir);
+  local_repo.write_file("cards/a.md", "hello");
+  local_repo.stage_path("cards/a.md");
+  local_repo.commit("seed");
+  {
+    auto db = holder::test::open_db_with_schema(db_path);
+    holder::project::ProjectRepo projects(db);
+    holder::project::ProjectSyncRepo sync(db);
+    create_project(projects, "proj-busy", local_dir, remote_dir.string(), "plain");
+    sync.record_pull_result("proj-busy", "succeeded", true, std::nullopt, now_epoch_seconds());
+    // No push has happened yet, so the first cycle pushes.
+  }
+
+  holder::core::activity().touch();
+  std::this_thread::sleep_for(std::chrono::milliseconds(1500));
+  REQUIRE(holder::core::activity().quiet_for() >= std::chrono::milliseconds(1400));
+
+  run_worker_with_intervals_for_seconds(db_path, 0, 2000000000, 1, 1);
+
+  // The push ran during the worker's first second, so the tracker was touched after the sleep.
+  REQUIRE(holder::core::activity().quiet_for() < std::chrono::milliseconds(1400));
+}
+

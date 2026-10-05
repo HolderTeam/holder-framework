@@ -58,7 +58,7 @@ class OpenEventStream {
     http::write(stream_, request);
     boost::beast::flat_buffer buffer;
     http::response_parser<http::empty_body> parser;
-    http::read_header(stream_, buffer, parser);  // headers only; the body never ends
+    http::read_header(stream_, buffer, parser); // headers only; the body never ends
     status_ = parser.get().result();
     stream_.expires_never();
   }
@@ -86,9 +86,14 @@ TEST_CASE("holderd --idle-exit stops a daemon that nobody uses", "[idle][process
   REQUIRE(home.wait_for_daemon_info(60s).has_value());
 
   int code = -1;
-  REQUIRE(holder::test::wait_until(30s, [&]() { return exited(*daemon, &code); }));
+  REQUIRE(holder::test::wait_until(30s, [&]() {
+    return exited(*daemon, &code);
+  }));
   REQUIRE(code == 0);
-  REQUIRE(holder::test::read_file(home.root() / "holderd.log").find("idle for 2 seconds") != std::string::npos);
+  REQUIRE(
+      holder::test::read_file(home.root() / "holderd.log").find("idle for 2 seconds") !=
+      std::string::npos
+  );
 }
 
 TEST_CASE("holderd without --idle-exit keeps running while unused", "[idle][process]") {
@@ -113,7 +118,11 @@ TEST_CASE("requests keep a daemon with --idle-exit alive", "[idle][process]") {
   const auto until = std::chrono::steady_clock::now() + 5s;
   while (std::chrono::steady_clock::now() < until) {
     const auto reply = holder::test::http_request_raw(
-        info->bind, info->port, info->token, boost::beast::http::verb::get, "/health"
+        info->bind,
+        info->port,
+        info->token,
+        boost::beast::http::verb::get,
+        "/health"
     );
     REQUIRE(reply.status == boost::beast::http::status::ok);
     REQUIRE_FALSE(exited(*daemon));
@@ -121,11 +130,15 @@ TEST_CASE("requests keep a daemon with --idle-exit alive", "[idle][process]") {
   }
 
   // Once the requests stop, it goes.
-  REQUIRE(holder::test::wait_until(30s, [&]() { return exited(*daemon); }));
+  REQUIRE(holder::test::wait_until(30s, [&]() {
+    return exited(*daemon);
+  }));
 }
 
-TEST_CASE("an open event stream keeps the daemon alive and a closing one restarts the quiet period",
-          "[idle][process]") {
+TEST_CASE(
+    "an open event stream keeps the daemon alive and a closing one restarts the quiet period",
+    "[idle][process]"
+) {
   IsolatedHome home;
   auto daemon = start_daemon(home, {"--idle-exit", "2"});
   REQUIRE(daemon.has_value());
@@ -147,7 +160,144 @@ TEST_CASE("an open event stream keeps the daemon alive and a closing one restart
   REQUIRE_FALSE(exited(*daemon));
 
   // Nobody returns, so it stops.
-  REQUIRE(holder::test::wait_until(30s, [&]() { return exited(*daemon); }));
+  REQUIRE(holder::test::wait_until(30s, [&]() {
+    return exited(*daemon);
+  }));
+}
+
+// The idle period is long, so only a goodbye can explain a quick exit.
+TEST_CASE(
+    "a goodbye lets an idle daemon stop long before its idle period",
+    "[idle][process][goodbye]"
+) {
+  IsolatedHome home;
+  auto daemon = start_daemon(home, {"--idle-exit", "30"});
+  REQUIRE(daemon.has_value());
+  const auto info = home.wait_for_daemon_info(60s);
+  REQUIRE(info.has_value());
+
+  const auto started = std::chrono::steady_clock::now();
+  const auto reply = holder::test::http_request_raw(
+      info->bind,
+      info->port,
+      info->token,
+      boost::beast::http::verb::post,
+      "/bye"
+  );
+  REQUIRE(reply.status == boost::beast::http::status::ok);
+
+  REQUIRE(holder::test::wait_until(15s, [&]() {
+    return exited(*daemon);
+  }));
+  REQUIRE(std::chrono::steady_clock::now() - started < 15s);
+  REQUIRE(
+      holder::test::read_file(home.root() / "holderd.log").find("said goodbye") != std::string::npos
+  );
+}
+
+TEST_CASE("a goodbye does not stop a daemon while a stream is open", "[idle][process][goodbye]") {
+  IsolatedHome home;
+  auto daemon = start_daemon(home, {"--idle-exit", "30"});
+  REQUIRE(daemon.has_value());
+  const auto info = home.wait_for_daemon_info(60s);
+  REQUIRE(info.has_value());
+
+  OpenEventStream stream(*info);
+  REQUIRE(stream.status() == boost::beast::http::status::ok);
+  const auto reply = holder::test::http_request_raw(
+      info->bind,
+      info->port,
+      info->token,
+      boost::beast::http::verb::post,
+      "/bye"
+  );
+  REQUIRE(reply.status == boost::beast::http::status::ok);
+
+  // Another client is still subscribed, so longer than the grace passes and it stays.
+  std::this_thread::sleep_for(5s);
+  REQUIRE_FALSE(exited(*daemon));
+
+  // Once that client leaves too, the goodbye is still in effect and the daemon stops quickly.
+  stream.close();
+  REQUIRE(holder::test::wait_until(15s, [&]() {
+    return exited(*daemon);
+  }));
+}
+
+TEST_CASE("any other request after a goodbye cancels it", "[idle][process][goodbye]") {
+  IsolatedHome home;
+  auto daemon = start_daemon(home, {"--idle-exit", "30"});
+  REQUIRE(daemon.has_value());
+  const auto info = home.wait_for_daemon_info(60s);
+  REQUIRE(info.has_value());
+  home.track(daemon->pid());
+
+  REQUIRE(
+      holder::test::http_request_raw(
+          info->bind,
+          info->port,
+          info->token,
+          boost::beast::http::verb::post,
+          "/bye"
+      )
+          .status == boost::beast::http::status::ok
+  );
+  // Something else turns up before the grace is over.
+  std::this_thread::sleep_for(500ms);
+  REQUIRE(
+      holder::test::http_request_raw(
+          info->bind,
+          info->port,
+          info->token,
+          boost::beast::http::verb::get,
+          "/health"
+      )
+          .status == boost::beast::http::status::ok
+  );
+
+  // Well past the grace, the daemon is still there, waiting out its full idle period.
+  std::this_thread::sleep_for(5s);
+  REQUIRE_FALSE(exited(*daemon));
+}
+
+TEST_CASE("a goodbye needs the bearer token", "[idle][process][goodbye]") {
+  IsolatedHome home;
+  auto daemon = start_daemon(home, {"--idle-exit", "30"});
+  REQUIRE(daemon.has_value());
+  const auto info = home.wait_for_daemon_info(60s);
+  REQUIRE(info.has_value());
+  home.track(daemon->pid());
+
+  const auto reply = holder::test::http_request_raw(
+      info->bind,
+      info->port,
+      "wrong-token",
+      boost::beast::http::verb::post,
+      "/bye"
+  );
+  REQUIRE(reply.status == boost::beast::http::status::unauthorized);
+  std::this_thread::sleep_for(5s);
+  REQUIRE_FALSE(exited(*daemon));
+}
+
+TEST_CASE("a goodbye to a daemon without --idle-exit changes nothing", "[idle][process][goodbye]") {
+  IsolatedHome home;
+  auto daemon = start_daemon(home, {});
+  REQUIRE(daemon.has_value());
+  const auto info = home.wait_for_daemon_info(60s);
+  REQUIRE(info.has_value());
+  home.track(daemon->pid());
+
+  const auto reply = holder::test::http_request_raw(
+      info->bind,
+      info->port,
+      info->token,
+      boost::beast::http::verb::post,
+      "/bye"
+  );
+  REQUIRE(reply.status == boost::beast::http::status::ok);
+  std::this_thread::sleep_for(5s);
+  REQUIRE_FALSE(exited(*daemon));
 }
 
 TEST_CASE("SIGTERM still stops a daemon started with --idle-exit at once", "[idle][process]") {
@@ -158,7 +308,9 @@ TEST_CASE("SIGTERM still stops a daemon started with --idle-exit at once", "[idl
 
   ::kill(static_cast<pid_t>(daemon->pid()), SIGTERM);
   int code = -1;
-  REQUIRE(holder::test::wait_until(15s, [&]() { return exited(*daemon, &code); }));
+  REQUIRE(holder::test::wait_until(15s, [&]() {
+    return exited(*daemon, &code);
+  }));
   REQUIRE(code == 0);
 }
 
@@ -166,8 +318,8 @@ TEST_CASE("holderd rejects invalid --idle-exit values", "[idle][process]") {
   IsolatedHome home;
   for (const char* bad : {"0", "-3", "abc", "86401", "99999999"}) {
     INFO("value: " << bad);
-    const std::string command = "\"" + std::string(HOLDER_BIN_PATH) + "\" --port 0 --idle-exit " + bad +
-                                " > /dev/null 2>&1";
+    const std::string command = "\"" + std::string(HOLDER_BIN_PATH) + "\" --port 0 --idle-exit " +
+                                bad + " > /dev/null 2>&1";
     REQUIRE(holder::test::run_system_command(command) == 2);
   }
 }
