@@ -284,10 +284,10 @@ void Listener::run(const holder::core::SignalHandler& signals) {
   std::mutex failure_mutex;
   std::exception_ptr worker_failure;
   std::atomic<bool> worker_failed{false};
-  auto database_worker = [&](auto run) {
-    return [&, run]() {
+  auto database_worker = [&](auto worker) {
+    return [&, worker]() {
       try {
-        (this->*run)();
+        (this->*worker)();
       } catch (...) {
         // A failed database open or worker initialization must reach the caller
         // after all threads have stopped, rather than terminate the process.
