@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - 'daemon/**'
+      - 'VERSION'
       - '.gitmodules'
       - '.github/workflows/daemon-*.yml'
   push:
     branches: [main]
     paths:
       - 'daemon/**'
+      - 'VERSION'
       - '.gitmodules'
       - '.github/workflows/daemon-*.yml'
   workflow_dispatch:

@@ -109,7 +109,7 @@ jobs:
           find "${stage_dir}/usr/lib" -type d -name cmake -prune \
             -exec rm -rf {} +
 
-          tr -d '[:space:]' < VERSION \
+          tr -d '[:space:]' < ../VERSION \
             > "${stage_dir}/release/holder-daemon-version.txt"
           tr -d '[:space:]' < API_VERSION \
             > "${stage_dir}/release/holder-daemon-api-version.txt"
@@ -133,7 +133,7 @@ jobs:
           set -euo pipefail
 
           stage_dir="${PWD}/out/artifacts/linux-backend"
-          expected_version="$(tr -d '[:space:]' < VERSION)"
+          expected_version="$(tr -d '[:space:]' < ../VERSION)"
           multiarch="$(gcc -print-multiarch)"
 
           export LD_LIBRARY_PATH="${stage_dir}/usr/lib/${multiarch}:${stage_dir}/usr/lib"
