@@ -1,9 +1,11 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace holder::core {
 
@@ -18,6 +20,10 @@ namespace holder::core {
 // The daemon is idle when no Scope is held, no event stream is open (the caller supplies
 // that count), and nothing has happened for the quiet period. The quiet period also covers
 // the brief gaps while a request moves between worker queues.
+//
+// A client that is leaving can say goodbye (POST /bye). That is a hint, not a command: it only
+// shortens the quiet period to a short grace, and only for as long as nothing new happens. Work,
+// open streams and activity still count, and a new connection or any other request cancels it.
 class ActivityTracker {
  public:
   using Clock = std::chrono::steady_clock;
@@ -25,7 +31,10 @@ class ActivityTracker {
   class Scope {
    public:
     Scope() = default;
-    Scope(Scope&& other) noexcept : tracker_(other.tracker_) { other.tracker_ = nullptr; }
+    Scope(Scope&& other) noexcept
+        : tracker_(other.tracker_) {
+      other.tracker_ = nullptr;
+    }
     Scope& operator=(Scope&& other) noexcept {
       if (this != &other) {
         release();
@@ -40,7 +49,8 @@ class ActivityTracker {
 
    private:
     friend class ActivityTracker;
-    explicit Scope(ActivityTracker* tracker) noexcept : tracker_(tracker) {}
+    explicit Scope(ActivityTracker* tracker) noexcept
+        : tracker_(tracker) {}
     void release() noexcept {
       if (tracker_ != nullptr) {
         tracker_->end();
@@ -50,7 +60,12 @@ class ActivityTracker {
     ActivityTracker* tracker_ = nullptr;
   };
 
-  ActivityTracker() noexcept { touch(); }
+  static constexpr Clock::duration kDefaultGoodbyeGrace = std::chrono::seconds(3);
+
+  explicit ActivityTracker(Clock::duration goodbye_grace = kDefaultGoodbyeGrace) noexcept
+      : goodbye_grace_(goodbye_grace) {
+    touch();
+  }
 
   // Work starts now and lasts until the returned Scope is destroyed.
   [[nodiscard]] Scope begin() noexcept {
@@ -72,7 +87,30 @@ class ActivityTracker {
   }
 
   bool idle(Clock::duration quiet, std::size_t open_streams = 0) const noexcept {
-    return active() == 0 && open_streams == 0 && quiet_for() >= quiet;
+    const auto required = goodbye_.load(std::memory_order_acquire) ? std::min(quiet, goodbye_grace_)
+                                                                   : quiet;
+    return active() == 0 && open_streams == 0 && quiet_for() >= required;
+  }
+
+  // A client says it is leaving. Counts as activity itself, so the grace starts from here.
+  void say_goodbye() noexcept {
+    goodbye_.store(true, std::memory_order_release);
+    touch();
+  }
+
+  void cancel_goodbye() noexcept { goodbye_.store(false, std::memory_order_release); }
+
+  bool goodbye_pending() const noexcept { return goodbye_.load(std::memory_order_acquire); }
+
+  // Something new arrived, so whoever said goodbye was not the last client.
+  void connection_arrived() noexcept {
+    cancel_goodbye();
+    touch();
+  }
+
+  // A request is about to run. Every request but the goodbye itself cancels a goodbye.
+  void request_started(std::string_view path) noexcept {
+    if (path != "/bye") cancel_goodbye();
   }
 
  private:
@@ -81,6 +119,8 @@ class ActivityTracker {
     touch();
   }
 
+  Clock::duration goodbye_grace_;
+  std::atomic<bool> goodbye_{false};
   std::atomic<std::size_t> active_{0};
   std::atomic<Clock::rep> last_activity_ticks_{0};
 };

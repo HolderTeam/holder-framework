@@ -448,7 +448,7 @@ void Listener::start_accept_loop() {
   }
 
   acceptor_.async_accept([this](boost::system::error_code ec, tcp::socket socket) mutable {
-    if (!ec) holder::core::activity().touch();
+    if (!ec) holder::core::activity().connection_arrived();
     if (ec) {
       if (stop_requested_.load() || ec == boost::asio::error::operation_aborted ||
           ec == boost::asio::error::bad_descriptor) {
@@ -603,6 +603,7 @@ void Listener::run_save_worker() {
 
     // Executing the request is work: keep the daemon from going idle until it is done.
     const auto activity_scope = holder::core::activity().begin();
+    holder::core::activity().request_started(prepared.path);
 
     Session session(
         std::move(prepared),
@@ -670,6 +671,7 @@ void Listener::run_general_worker() {
 
     // Executing the request (including a streaming AI run) is work.
     const auto activity_scope = holder::core::activity().begin();
+    holder::core::activity().request_started(prepared.path);
 
     if (should_drop_stale_background_request(prepared)) {
       spdlog::info( // LCOV_EXCL_LINE: spdlog macro expansion retains an unexecuted duplicate.

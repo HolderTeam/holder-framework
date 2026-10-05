@@ -606,3 +606,12 @@ TEST_CASE("OpenAPI describes change feed recovery and SSE cursors", "[openapi][e
       std::vector<std::string>{"deleted", "entity", "entity_id", "git_revision", "project_id"}
   );
 }
+
+TEST_CASE("OpenAPI contracts the goodbye hint", "[openapi][idle]") {
+  const auto document = load_openapi();
+  const auto bye = document["paths"]["/bye"]["post"];
+  REQUIRE(bye.IsDefined());
+  require_json_response_ref(bye, "200", "ByeResponse");
+  require_json_response_ref(bye, "401", "ErrorResponse");
+  REQUIRE_FALSE(bye["requestBody"].IsDefined());
+}
