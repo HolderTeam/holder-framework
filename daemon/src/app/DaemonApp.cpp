@@ -1,4 +1,5 @@
 #include "app/DaemonApp.h"
+#include "core/ActivityTracker.h"
 
 #include "ai/AiNudgeDurability.h"
 #include "ai/AiProviderCredentialRecovery.h"
@@ -61,8 +62,11 @@ namespace holder::app {
 namespace {
 
 void print_usage(std::ostream& out) {
-  out << "Usage: holderd [--help] [--version] [--bind <addr>] [--port <port>] [--reindex] "
-         "[--rebuild-database [--dry-run]]\n";
+  out << "Usage: holderd [--help] [--version] [--bind <addr>] [--port <port>] "
+         "[--idle-exit <seconds>] [--reindex] [--rebuild-database [--dry-run]]\n"
+         "\n"
+         "  --idle-exit <seconds>  Exit after this many seconds with no requests, open event\n"
+         "                         streams or background work. Off by default.\n";
 } // LCOV_EXCL_LINE: function cleanup after the covered startup validation throw.
 
 std::filesystem::path find_schema_sql() {
@@ -176,6 +180,7 @@ int run_daemon(int argc, char* argv[]) {
 
   std::string bind = "127.0.0.1";
   unsigned short port = 11499;
+  int idle_exit_seconds = 0;
   bool reindex_only = false;
   bool rebuild_database_only = false;
   bool rebuild_dry_run = false;
@@ -193,6 +198,18 @@ int run_daemon(int argc, char* argv[]) {
         port = static_cast<unsigned short>(parsed);
       } catch (const std::exception& ex) {
         spdlog::error("Invalid --port value: {} ({})", argv[i], ex.what());
+        return 2;
+      }
+    } else if (arg == "--idle-exit" && i + 1 < argc) {
+      try {
+        const int parsed = std::stoi(argv[++i]);
+        if (parsed < 1 || parsed > 86400) {
+          spdlog::error("Invalid --idle-exit value: {} (use 1 to 86400 seconds)", parsed);
+          return 2;
+        }
+        idle_exit_seconds = parsed;
+      } catch (const std::exception& ex) {
+        spdlog::error("Invalid --idle-exit value: {} ({})", argv[i], ex.what());
         return 2;
       }
     } else if (arg == "--help" || arg == "-h") {
@@ -406,7 +423,54 @@ int run_daemon(int argc, char* argv[]) {
       std::move(database_health_monitor_thread)
   );
 
+  // With --idle-exit the daemon stops itself once nothing needs it: no request or background
+  // work in progress, no open event stream, and nothing has happened for the quiet period.
+  // Starting the clock now gives the process that started us time to connect.
+  std::atomic<bool> idle_monitor_stop_requested{false};
+  std::thread idle_monitor_thread;
+  if (idle_exit_seconds > 0) {
+    spdlog::info(
+        "idle exit enabled: stopping after {} seconds without activity.",
+        idle_exit_seconds
+    );
+    holder::core::activity().touch();
+    idle_monitor_thread = std::thread([&]() { // LCOV_EXCL_LINE: thread entry cleanup line.
+      const auto quiet = std::chrono::seconds(idle_exit_seconds);
+      std::size_t previous_streams = 0;
+      while (!idle_monitor_stop_requested.load() && !signals.is_requested()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        if (idle_monitor_stop_requested.load() || signals.is_requested()) break;
+        const auto open_streams = server.open_stream_count();
+        // A client leaving counts as activity, so one that reconnects its stream (after a
+        // network blip, say) still finds the daemon there for a full quiet period.
+        if (open_streams < previous_streams) holder::core::activity().touch();
+        previous_streams = open_streams;
+        if (!holder::core::activity().idle(quiet, open_streams)) continue;
+
+        // Anything committed but not yet pushed goes out before the daemon stops. The push is
+        // not counted as activity, so if nothing used the daemon in the meantime it stops
+        // right after, and if something did, it carries on.
+        try {
+          sync_worker.run_final_push();
+        } catch (const std::exception& ex) {
+          spdlog::warn("final push before exiting failed: {}", ex.what());
+        }
+        if (!holder::core::activity().idle(quiet, server.open_stream_count())) continue;
+
+        spdlog::info(
+            "idle for {} seconds with no requests, event streams or background work; exiting.",
+            idle_exit_seconds
+        );
+        signals.request_stop();
+        server.stop();
+        break;
+      }
+    });
+  }
+  StopFlagThreadGuard idle_monitor(idle_monitor_stop_requested, std::move(idle_monitor_thread));
+
   server.run(signals);
+  idle_monitor.stop_and_join();
   database_health_monitor.stop_and_join();
   const bool shutdown_signal_received = signals.is_requested();
   runner.stop();

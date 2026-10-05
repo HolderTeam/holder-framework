@@ -11,6 +11,7 @@
 #include "project/ProjectSyncRepo.h"
 #include "project/Rebuilder.h"
 
+#include "GitRemoteTestSupport.h"
 #include "http_test_helpers.h"
 
 #include <catch2/catch_test_macros.hpp>
@@ -619,4 +620,141 @@ TEST_CASE("ProjectSyncWorker catches post-push metrics refresh failure", "[sync]
   const auto state = load_sync_state(db_path, "proj-post-push-metrics-fail");
   REQUIRE(state.has_value());
   REQUIRE(state->last_push_status.has_value());
+}
+
+namespace {
+
+// A project whose local repository has one commit, with a bare remote that accepts pushes.
+struct FinalPushFixture {
+  std::filesystem::path dir = holder::test::make_temp_dir();
+  std::filesystem::path db_path = dir / "holder.db";
+  std::filesystem::path remote_dir = dir / "remote.git";
+  std::filesystem::path local_dir = dir / "local_repo";
+
+  FinalPushFixture() {
+    holder::test::init_bare_repo(remote_dir);
+    holder::git::GitRepo local_repo;
+    local_repo.open_or_init(local_dir);
+    local_repo.write_file("cards/a.md", "hello");
+    local_repo.stage_path("cards/a.md");
+    local_repo.commit("seed");
+
+    auto db = holder::test::open_db_with_schema(db_path);
+    holder::project::ProjectRepo projects(db);
+    create_project(projects, "proj-final", local_dir, remote_dir.string(), "plain");
+  }
+
+  // Pretend a push just succeeded, so a normal cycle would wait out the whole push interval.
+  void record_recent_push() {
+    holder::platform::Db db;
+    db.open(db_path);
+    holder::project::ProjectSyncRepo sync(db);
+    sync.record_push_result("proj-final", "pushed", true, std::nullopt, now_epoch_seconds());
+  }
+};
+
+holder::sync::ProjectSyncWorker worker_with_long_push_interval(const std::filesystem::path& db_path
+) {
+  return holder::sync::ProjectSyncWorker(
+      db_path,
+      {.push_interval_seconds = 2000000000,
+       .pull_interval_seconds = 3600,
+       .poll_interval_seconds = 1}
+  );
+}
+
+} // namespace
+
+TEST_CASE(
+    "a final push sends unpushed commits even though the push interval has not passed",
+    "[sync][worker][final-push]"
+) {
+  FinalPushFixture fixture;
+  fixture.record_recent_push();
+  REQUIRE_FALSE(holder::test::remote_has_local_head(fixture.local_dir, fixture.remote_dir));
+
+  auto worker = worker_with_long_push_interval(fixture.db_path);
+  REQUIRE(worker.run_final_push() == 1);
+
+  REQUIRE(holder::test::remote_has_local_head(fixture.local_dir, fixture.remote_dir));
+  const auto state = load_sync_state(fixture.db_path, "proj-final");
+  REQUIRE(state.has_value());
+  REQUIRE(state->last_push_status == std::optional<std::string>("pushed"));
+  REQUIRE(state->unpushed_commits_count == 0);
+}
+
+TEST_CASE(
+    "a final push has nothing to do once everything is pushed",
+    "[sync][worker][final-push]"
+) {
+  FinalPushFixture fixture;
+  fixture.record_recent_push();
+  auto worker = worker_with_long_push_interval(fixture.db_path);
+
+  REQUIRE(worker.run_final_push() == 1);
+  REQUIRE(worker.run_final_push() == 0);
+  REQUIRE(holder::test::remote_has_local_head(fixture.local_dir, fixture.remote_dir));
+}
+
+TEST_CASE(
+    "a final push picks up a commit made after the previous push",
+    "[sync][worker][final-push]"
+) {
+  FinalPushFixture fixture;
+  fixture.record_recent_push();
+  auto worker = worker_with_long_push_interval(fixture.db_path);
+  REQUIRE(worker.run_final_push() == 1);
+
+  holder::git::GitRepo local_repo;
+  local_repo.open_or_init(fixture.local_dir);
+  local_repo.write_file("cards/b.md", "written later");
+  local_repo.stage_path("cards/b.md");
+  local_repo.commit("later");
+  REQUIRE_FALSE(holder::test::remote_has_local_head(fixture.local_dir, fixture.remote_dir));
+
+  REQUIRE(worker.run_final_push() == 1);
+  REQUIRE(holder::test::remote_has_local_head(fixture.local_dir, fixture.remote_dir));
+}
+
+TEST_CASE("a final push respects the back-off after a failed push", "[sync][worker][final-push]") {
+  FinalPushFixture fixture;
+  {
+    holder::platform::Db db;
+    db.open(fixture.db_path);
+    holder::project::ProjectSyncRepo sync(db);
+    sync.record_push_result(
+        "proj-final",
+        "network_error",
+        false,
+        std::string("offline"),
+        now_epoch_seconds()
+    );
+  }
+  const auto before = load_sync_state(fixture.db_path, "proj-final");
+  REQUIRE(before.has_value());
+  REQUIRE(before->next_retry_at.has_value());
+  REQUIRE(before->next_retry_at.value() > now_epoch_seconds());
+
+  auto worker = worker_with_long_push_interval(fixture.db_path);
+  REQUIRE(worker.run_final_push() == 0);
+  REQUIRE_FALSE(holder::test::remote_has_local_head(fixture.local_dir, fixture.remote_dir));
+}
+
+TEST_CASE("a final push skips a project without a remote", "[sync][worker][final-push]") {
+  const auto dir = holder::test::make_temp_dir();
+  const auto db_path = dir / "holder.db";
+  const auto local_dir = dir / "local_repo";
+  holder::git::GitRepo local_repo;
+  local_repo.open_or_init(local_dir);
+  local_repo.write_file("cards/a.md", "hello");
+  local_repo.stage_path("cards/a.md");
+  local_repo.commit("seed");
+  {
+    auto db = holder::test::open_db_with_schema(db_path);
+    holder::project::ProjectRepo projects(db);
+    create_project(projects, "proj-local", local_dir, "", "plain");
+  }
+
+  auto worker = worker_with_long_push_interval(db_path);
+  REQUIRE(worker.run_final_push() == 0);
 }

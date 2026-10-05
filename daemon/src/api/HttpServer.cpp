@@ -94,4 +94,6 @@ void HttpServer::stop() {
   }
 }
 
+std::size_t HttpServer::open_stream_count() { return listener_ ? listener_->open_stream_count() : 0; }
+
 } // namespace holder::api

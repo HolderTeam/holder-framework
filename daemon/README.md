@@ -293,6 +293,11 @@ Git revisions, replay limits and client behavior.
 so a client application does not have to reimplement that. It prints one JSON object with
 `--json` and uses distinct exit codes. See [the ensure contract](docs/ensure.md).
 
+A daemon started for one client can stop by itself when nothing needs it:
+`holderd --idle-exit SECONDS` (or `holderctl ensure --idle-exit SECONDS`). It stays up while a
+request, an open event stream or background work needs it. See
+[the idle-exit contract](docs/idle-exit.md).
+
 ## Project removal and upgrades
 
 Removing a project through the API removes it from this device's database and

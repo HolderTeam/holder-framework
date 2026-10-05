@@ -21,13 +21,18 @@ class ProjectSyncWorker {
 
   void run(const holder::core::SignalHandler& signals);
 
+  // Pushes, now, every project with commits that have not been pushed. For the way out of an
+  // idle exit. It ignores the push interval but still respects the back-off after a failed
+  // push, so an offline machine is not held up retrying. Returns how many pushes it attempted.
+  int run_final_push();
+
   static void set_fail_post_pull_metrics_for_tests(bool enabled);
   static void set_fail_post_push_metrics_for_tests(bool enabled);
 
  private:
   long long now_epoch_seconds() const;
   void run_startup_pull_pass();
-  void run_push_cycle();
+  int run_push_cycle(bool final_push = false);
 
   std::filesystem::path db_path_;
   int push_interval_seconds_ = 1200;

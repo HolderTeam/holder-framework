@@ -26,6 +26,8 @@ class SseRegistry {
   ~SseRegistry();
   bool add(const std::shared_ptr<SseStream>& stream);
   void stop();
+  // Streams that are still open; the daemon is not idle while a client is subscribed.
+  std::size_t open_count();
   boost::asio::thread_pool& poll_workers() { return poll_workers_; }
 
  private:

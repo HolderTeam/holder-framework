@@ -1,3 +1,4 @@
+#include "core/ActivityTracker.h"
 #include "api/routes/AiResourceRoutes.h"
 #include "api/routes/GoogleDriveOAuthRoutes.h"
 #include "api/support/HttpResponses.h"
@@ -655,9 +656,17 @@ bool handle_ai_resource_routes(
             .error = {},
         };
       }
+      // The import outlives the request that queued it; it is work until it finishes.
       std::thread import_thread(
-          [job_id, request, location_copy, binding_copy, db_path, cache, uuid_v4, git_ops](
-          ) mutable {
+          [job_id,
+           request,
+           location_copy,
+           binding_copy,
+           db_path,
+           cache,
+           uuid_v4,
+           git_ops,
+           activity_scope = holder::core::activity().begin()]() mutable {
             try {
               holder::platform::Db job_db;
               job_db.open(db_path);

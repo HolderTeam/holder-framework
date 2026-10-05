@@ -111,6 +111,8 @@ add_executable(holder_daemon_tests
   HolderCtlDownload_test.cpp
   HolderCtlExport_test.cpp
   HolderCtlEnsure_test.cpp
+  ActivityTracker_test.cpp
+  DaemonIdleExit_test.cpp
   MilestoneDateTime_test.cpp
   ProjectSyncWorker_test.cpp
   AiLocalModelConfigRepo_test.cpp

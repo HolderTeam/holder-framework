@@ -34,6 +34,16 @@ void SseRegistry::stop() {
     if (auto stream = weak.lock()) stream->cancel();
 }
 
+std::size_t SseRegistry::open_count() {
+  std::lock_guard lock(mutex_);
+  std::size_t count = 0;
+  for (const auto& weak : streams_) {
+    const auto stream = weak.lock();
+    if (stream && stream->open()) ++count;
+  }
+  return count;
+}
+
 SseStream::SseStream(
     boost::asio::ip::tcp::socket socket,
     std::shared_ptr<SseRegistry> registry,

@@ -231,6 +231,8 @@ void print_ensure_usage(std::ostream& out) {
       << "  --mode auto|service|spawn     How to start it (default auto)\n"
       << "  --daemon PATH                 Start this holderd (implies --mode spawn)\n"
       << "  --daemon-arg ARG              Pass ARG to holderd; may be repeated\n"
+      << "  --idle-exit SECONDS           Start holderd so it stops itself after this long without\n"
+      << "                                activity (not used for the systemd service)\n"
       << "  --workdir PATH                Working directory for a started holderd\n"
       << "\n"
       << "Exit codes:\n"
@@ -355,6 +357,19 @@ EnsureOptions parse_ensure_options(int argc, char* argv[]) {
       options.daemon_path = value;
     } else if (take_value(arg, "--daemon-arg", argc, argv, i, &value)) {
       options.daemon_args.push_back(value);
+    } else if (take_value(arg, "--idle-exit", argc, argv, i, &value)) {
+      int seconds = 0;
+      try {
+        std::size_t used = 0;
+        seconds = std::stoi(value, &used);
+        if (used != value.size()) throw std::invalid_argument("trailing characters");
+      } catch (const std::exception&) {
+        usage_error("Option --idle-exit needs a whole number of seconds, got '" + value + "'");
+      }
+      if (seconds < 1 || seconds > 86400) {
+        usage_error("Option --idle-exit must be between 1 and 86400 seconds");
+      }
+      options.idle_exit_seconds = seconds;
     } else if (take_value(arg, "--workdir", argc, argv, i, &value)) {
       options.working_dir = value;
     } else {
@@ -429,6 +444,11 @@ EnsureResult ensure_daemon(const holder::core::Paths& paths, const EnsureOptions
     holder::platform::DetachedProcessRequest request;
     request.executable = daemon;
     request.args = options.daemon_args;
+    if (options.idle_exit_seconds.has_value()) {
+      request.args.push_back("--idle-exit");
+      request.args.push_back(std::to_string(*options.idle_exit_seconds));
+      result.idle_exit_seconds = *options.idle_exit_seconds;
+    }
     request.working_dir =
         options.working_dir.empty() ? default_working_dir(daemon) : options.working_dir;
     request.log_path = log_path;
@@ -524,6 +544,7 @@ nlohmann::json ensure_result_to_json(const EnsureResult& result) {
   if (!result.mode.empty()) out["mode"] = result.mode;
   if (!result.daemon.empty()) out["daemon"] = result.daemon;
   if (result.spawned_pid > 0) out["spawned_pid"] = result.spawned_pid;
+  if (result.idle_exit_seconds > 0) out["idle_exit_seconds"] = result.idle_exit_seconds;
   if (!result.log_path.empty()) out["log"] = result.log_path;
   if (!result.ok) out["error"] = {{"code", result.error_code}, {"message", result.message}};
   return out;
