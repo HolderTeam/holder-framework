@@ -1,4 +1,4 @@
-#include "cli/commands/MilestoneDateTime.h"
+#include "commands/MilestoneDateTime.h"
 
 #if __has_include(<catch2/catch_test_macros.hpp>)
 #include <catch2/catch_test_macros.hpp>

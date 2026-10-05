@@ -1,5 +1,5 @@
-#include "cli/commands/Commands.h"
-#include "cli/commands/Support.h"
+#include "commands/Commands.h"
+#include "commands/Support.h"
 
 #include <boost/system/system_error.hpp>
 

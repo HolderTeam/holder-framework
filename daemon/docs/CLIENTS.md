@@ -34,6 +34,9 @@ Important:
 To make sure a compatible daemon is running (and start one if it is not), run
 `holderctl ensure --json` rather than reimplementing that logic; see [ensure.md](ensure.md).
 
+A client that started a daemon with `--idle-exit` should hold a `GET /events` stream while it runs
+and may call `POST /bye` as it closes, so the daemon can stop sooner; see [idle-exit.md](idle-exit.md).
+
 ## 2) Authentication Model
 
 Most endpoints require:

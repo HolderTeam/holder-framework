@@ -1,4 +1,4 @@
-#include "cli/commands/Support.h"
+#include "commands/Support.h"
 
 #include "identity/Uuid.h"
 

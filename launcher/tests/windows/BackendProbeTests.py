@@ -437,7 +437,7 @@ class LauncherTests(unittest.TestCase):
         with Server([(0, PONG)]) as server:
             self.launch(server.port, True)
         log = (self.root / "local" / "holder" / "launcher.log").read_text(encoding="utf-8")
-        version = (Path(__file__).resolve().parents[2] / "VERSION").read_text().strip()
+        version = (Path(__file__).resolve().parents[3] / "VERSION").read_text().strip()
         self.assertIn(f"[launcher={version}]", log)
         self.assertRegex(log, r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z \[pid=\d+\]")
         self.assertIn(f"root={self.root}", log)

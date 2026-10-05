@@ -1,6 +1,6 @@
-#include "cli/commands/Commands.h"
+#include "commands/Commands.h"
 
-#include "cli/commands/Common.h"
+#include "commands/Common.h"
 
 #include <boost/beast/http.hpp>
 

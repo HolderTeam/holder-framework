@@ -18,10 +18,20 @@ Download Holder for Windows, macOS or Linux from [holder.team](https://holder.te
 
 ## In this repository
 
+- [`daemon/`](daemon/) - the Holder daemon (`holderd`), its HTTP API and its CMake build, which also builds `holderctl`.
+- [`cli/`](cli/) - `holderctl`, the command line client, including `holderctl ensure`.
+- [`common/`](common/) - platform code shared by the daemon and `holderctl`.
 - [`launcher/`](launcher/) - the launcher that starts the Holder backend and opens the desktop app.
 - [`staging/`](staging/) - assembles and checks build artifacts for each platform.
 - [`python/`](python/) - an experimental Python client for the Holder daemon's HTTP API.
 - [`release/`](release/) - signing, verification and publishing of releases.
+
+## Version
+
+Everything in this repository (the daemon, the launcher, the staging and release tooling and the Python client)
+has one version: the [`VERSION`](VERSION) file at the root. Change it there and nowhere else. The daemon's
+[`API_VERSION`](daemon/API_VERSION) is separate: it versions the HTTP contract that clients check, not the
+release. `holder-core` and the desktop app have their own versions.
 
 ## Licence
 

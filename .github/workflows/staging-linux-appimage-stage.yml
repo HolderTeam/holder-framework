@@ -44,7 +44,7 @@ on:
         default: ""
         type: string
       appimage_version:
-        description: Optional product version; blank uses staging/VERSION
+        description: Optional product version; blank uses the root VERSION
         required: false
         default: ""
         type: string
@@ -323,7 +323,7 @@ jobs:
           backend_api_version="$(cat "${backend_root}/release/holder-daemon-api-version.txt")"
           desktop_api_minimum="$(jq -er '.daemon_api.minimum' "${compatibility_file}")"
           desktop_api_maximum="$(jq -er '.daemon_api.maximum_exclusive' "${compatibility_file}")"
-          appimage_version="${APPIMAGE_VERSION_INPUT:-$(tr -d '[:space:]' < sources/holder-framework/staging/VERSION)}"
+          appimage_version="${APPIMAGE_VERSION_INPUT:-$(tr -d '[:space:]' < sources/holder-framework/VERSION)}"
 
           semver_pattern='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
           api_pattern='^[0-9]+\.[0-9]+$'

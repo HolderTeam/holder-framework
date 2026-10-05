@@ -70,6 +70,16 @@ jobs:
 
           gpgconf --kill gpg-agent
 
+      - name: Copy the holderctl and shared sources into daemon/
+        working-directory: daemon
+        run: |
+          # The source package is built from daemon/ alone, so it carries copies of the holderctl
+          # sources (cli/) and the platform files holderd and holderctl share (common/); the CMake
+          # build uses these when the directories beside daemon/ are out of reach.
+          rm -rf cli common
+          cp -a ../cli ./cli
+          cp -a ../common ./common
+
       - name: Prepare Debian directory
         env:
           SERIES: ${{ matrix.series }}
@@ -81,6 +91,9 @@ jobs:
           rm -rf debian build
           cp -a packaging/linux/debian ./debian
 
+          # The source package is built from daemon/ alone, so it carries a copy of the framework's
+          # root VERSION, which the CMake build reads when the root is out of reach.
+          cp ../VERSION VERSION
           VERSION="$(tr -d '[:space:]' < VERSION)"
           if ! echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "VERSION must contain a semantic version like 0.1.0; got '$VERSION'" >&2
