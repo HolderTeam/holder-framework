@@ -1,4 +1,4 @@
-name: Promote Linux AppImage to release
+name: Release / Promote Linux AppImage
 
 on:
   workflow_dispatch:

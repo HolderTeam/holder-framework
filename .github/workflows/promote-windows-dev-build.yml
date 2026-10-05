@@ -1,4 +1,4 @@
-name: Promote Windows dev build
+name: Release / Promote Windows dev build
 
 on:
   workflow_dispatch:

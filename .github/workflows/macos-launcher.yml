@@ -1,4 +1,4 @@
-name: macOS launcher
+name: Launcher / macOS
 
 on:
   pull_request:

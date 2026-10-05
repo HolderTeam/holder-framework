@@ -1,4 +1,4 @@
-name: Linux backend artifact
+name: Daemon / Linux backend
 
 on:
   workflow_call:

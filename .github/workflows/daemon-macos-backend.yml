@@ -1,4 +1,4 @@
-name: macOS backend
+name: Daemon / macOS backend
 
 on:
   workflow_call:

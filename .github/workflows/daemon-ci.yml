@@ -1,4 +1,4 @@
-name: Daemon SDK integration
+name: Daemon / CI
 
 on:
   pull_request:

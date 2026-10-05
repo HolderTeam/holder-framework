@@ -1,4 +1,4 @@
-name: Windows launcher
+name: Launcher / Windows
 
 on:
   pull_request:

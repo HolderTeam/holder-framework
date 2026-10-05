@@ -1,4 +1,4 @@
-name: Upload holder-daemon to Launchpad
+name: Daemon / Upload to Launchpad
 
 on:
   push:

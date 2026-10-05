@@ -1,4 +1,4 @@
-name: Linux AppImage staged package
+name: Staging / Linux AppImage
 
 on:
   workflow_dispatch:

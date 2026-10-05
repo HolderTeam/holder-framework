@@ -10,7 +10,7 @@ Normal development staging continues to follow latest-green.
 
 ## Windows
 
-The Windows staged package workflow assembles the three Windows build outputs into a release-candidate layout:
+The `Staging / Windows` workflow assembles the three Windows build outputs into a release-candidate layout:
 
 - `holder-desktop-windows` from `HolderTeam/holder-desktop`
 - `holder-daemon-windows-backend` from core's downstream integration run

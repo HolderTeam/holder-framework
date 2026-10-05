@@ -1,4 +1,4 @@
-name: Sign Linux AppImage release candidate
+name: Release / Sign Linux AppImage
 
 on:
   workflow_dispatch:

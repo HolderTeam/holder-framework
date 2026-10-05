@@ -1,4 +1,4 @@
-name: macOS staged app
+name: Staging / macOS
 
 on:
   workflow_dispatch:

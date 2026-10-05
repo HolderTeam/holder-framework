@@ -1,6 +1,6 @@
 # Linux AppImage signing
 
-`Sign Linux AppImage release candidate` turns one exact, successful
+`Release / Sign Linux AppImage` turns one exact, successful
 `HolderTeam/holder-framework` AppImage artifact into a signed and tested release
 candidate. It deliberately does not create or update a GitHub release.
 
@@ -61,10 +61,10 @@ to `HolderTeam/holder-framework`; it is not a signing secret.
 
 ## Running the workflow
 
-Start `Sign Linux AppImage release candidate` manually and provide:
+Start `Release / Sign Linux AppImage` manually and provide:
 
 - `expected_version`: the exact product version in the staging artifact.
-- `staging_run_id`: the exact successful `Linux AppImage staged package` run.
+- `staging_run_id`: the exact successful `Staging / Linux AppImage` run.
 - The default staging repository and artifact name normally need no changes.
 
 Requiring an exact run is intentional. “Latest green main” is convenient for
@@ -104,7 +104,7 @@ tools.
 
 ## Promoting to a draft release
 
-Run `Promote Linux AppImage to draft release` with the exact version and
+Run `Release / Promote Linux AppImage` with the exact version and
 successful signing workflow run ID. The workflow re-verifies the signature,
 provenance, smoke test, and GitHub artifact attestation before uploading these
 release-facing files:
