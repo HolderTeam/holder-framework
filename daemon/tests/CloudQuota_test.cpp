@@ -1,0 +1,263 @@
+#include "api/support/CloudQuota.h"
+#include "platform/Db.h"
+
+#include <catch2/catch_test_macros.hpp>
+#include <catch2/matchers/catch_matchers_string.hpp>
+
+#include <filesystem>
+#include <fstream>
+#include <string>
+
+namespace {
+
+void apply_schema(holder::platform::Db& db) {
+  std::ifstream in(SCHEMA_SQL_PATH);
+  REQUIRE(in.is_open());
+  std::string sql((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+  db.exec(sql);
+}
+
+int interrupt_sqlite(void*) { return 1; }
+
+} // namespace
+
+TEST_CASE("CloudQuota cooldown failure backoff and clear", "[cloud_quota]") {
+  const auto dir = std::filesystem::temp_directory_path() / "holder_cloud_quota";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  apply_schema(db);
+
+  const std::string provider = "chocolatefactory";
+  const std::string model = "gemma-3-12b-it";
+
+  const auto missing = holder::api::support::load_cloud_model_cooldown(db, provider, model);
+  REQUIRE_FALSE(missing.has_value());
+
+  const auto first =
+      holder::api::support::record_cloud_model_failure(db, provider, model, "timeout", 1000);
+  REQUIRE(first.failure_count == 1);
+  REQUIRE(first.cooldown_until == 1030);
+
+  const auto second =
+      holder::api::support::record_cloud_model_failure(db, provider, model, "429", 1050);
+  REQUIRE(second.failure_count == 2);
+  REQUIRE(second.cooldown_until == 1110);
+
+  const auto loaded = holder::api::support::load_cloud_model_cooldown(db, provider, model);
+  REQUIRE(loaded.has_value());
+  REQUIRE(loaded->failure_count == 2);
+  REQUIRE(loaded->cooldown_until == 1110);
+  REQUIRE(loaded->last_error == "429");
+
+  holder::api::support::clear_cloud_model_cooldown(db, provider, model, 1200);
+  const auto cleared = holder::api::support::load_cloud_model_cooldown(db, provider, model);
+  REQUIRE(cleared.has_value());
+  REQUIRE(cleared->failure_count == 0);
+  REQUIRE(cleared->cooldown_until == 0);
+  REQUIRE(cleared->last_error.empty());
+  REQUIRE(cleared->updated_at == 1200);
+}
+
+TEST_CASE("CloudQuota cooldown supports configurable base/cap", "[cloud_quota]") {
+  const auto dir = std::filesystem::temp_directory_path() / "holder_cloud_quota_custom";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  apply_schema(db);
+
+  const std::string provider = "chocolatefactory";
+  const std::string model = "gemma-3-1b-it";
+
+  const auto first = holder::api::support::record_cloud_model_failure(
+      db,
+      provider,
+      model,
+      "timeout",
+      1000,
+      10,
+      40
+  );
+  REQUIRE(first.failure_count == 1);
+  REQUIRE(first.cooldown_until == 1010);
+
+  const auto second = holder::api::support::record_cloud_model_failure(
+      db,
+      provider,
+      model,
+      "timeout",
+      1010,
+      10,
+      40
+  );
+  REQUIRE(second.failure_count == 2);
+  REQUIRE(second.cooldown_until == 1030);
+
+  const auto third = holder::api::support::record_cloud_model_failure(
+      db,
+      provider,
+      model,
+      "timeout",
+      1020,
+      10,
+      40
+  );
+  REQUIRE(third.failure_count == 3);
+  REQUIRE(third.cooldown_until == 1060); // 40s cap
+}
+
+TEST_CASE("CloudQuota durable ledger restores usage after SQLite loss", "[cloud_quota]") {
+  const auto dir = std::filesystem::temp_directory_path() / "holder_cloud_quota_ledger";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  const auto ledger = dir / "cloud-usage.json";
+
+  holder::platform::Db original;
+  original.open(dir / "original.db");
+  apply_schema(original);
+  holder::api::support::initialize_cloud_usage_ledger(original, ledger);
+  holder::api::support::record_cloud_usage_event(
+      original,
+      "provider",
+      "model",
+      12,
+      8,
+      100,
+      "ledger-test"
+  );
+  REQUIRE(
+      holder::api::support::load_cloud_window_usage(original, "provider", "model", 0).tokens == 20
+  );
+
+  holder::platform::Db rebuilt;
+  rebuilt.open(dir / "rebuilt.db");
+  apply_schema(rebuilt);
+  holder::api::support::restore_cloud_usage_ledger(rebuilt, ledger);
+  const auto usage = holder::api::support::load_cloud_window_usage(rebuilt, "provider", "model", 0);
+  REQUIRE(usage.requests == 1);
+  REQUIRE(usage.tokens == 20);
+}
+
+TEST_CASE("CloudQuota prepare-query errors are surfaced", "[cloud_quota]") {
+  const auto dir = std::filesystem::temp_directory_path() / "holder_cloud_quota_prepare_errors";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  apply_schema(db);
+  db.close();
+
+  REQUIRE_THROWS_WITH(
+      holder::api::support::load_cloud_window_usage(db, "p", "m", 0),
+      Catch::Matchers::ContainsSubstring("prepare cloud usage query failed")
+  );
+  REQUIRE_THROWS_WITH(
+      holder::api::support::record_cloud_usage_event(db, "p", "m", 1, 2, 3, "seed"),
+      Catch::Matchers::ContainsSubstring("prepare cloud usage insert failed")
+  );
+  REQUIRE_THROWS_WITH(
+      holder::api::support::load_cloud_model_cooldown(db, "p", "m"),
+      Catch::Matchers::ContainsSubstring("prepare cloud cooldown query failed")
+  );
+}
+
+TEST_CASE("CloudQuota insert/upsert/clear step failures are surfaced", "[cloud_quota]") {
+  const auto dir = std::filesystem::temp_directory_path() / "holder_cloud_quota_step_errors";
+  std::filesystem::remove_all(dir);
+  std::filesystem::create_directories(dir);
+  const auto db_path = dir / "holder.db";
+
+  holder::platform::Db db;
+  db.open(db_path);
+  apply_schema(db);
+
+  db.exec("CREATE TRIGGER fail_cloud_usage_insert "
+          "BEFORE INSERT ON ai_cloud_usage_events "
+          "BEGIN "
+          "  SELECT RAISE(ABORT, 'fail usage insert'); "
+          "END;");
+  REQUIRE_THROWS_WITH(
+      holder::api::support::record_cloud_usage_event(db, "p", "m", 1, 2, 3, "seed"),
+      Catch::Matchers::ContainsSubstring("insert cloud usage event failed")
+  );
+  db.exec("DROP TRIGGER fail_cloud_usage_insert;");
+
+  db.exec("CREATE TRIGGER fail_cloud_cooldown_insert "
+          "BEFORE INSERT ON ai_cloud_model_cooldowns "
+          "BEGIN "
+          "  SELECT RAISE(ABORT, 'fail cooldown upsert'); "
+          "END;");
+  REQUIRE_THROWS_WITH(
+      holder::api::support::record_cloud_model_failure(db, "p", "m", "oops", 1000),
+      Catch::Matchers::ContainsSubstring("upsert cloud cooldown failed")
+  );
+  REQUIRE_THROWS_WITH(
+      holder::api::support::clear_cloud_model_cooldown(db, "p", "m", 1100),
+      Catch::Matchers::ContainsSubstring("clear cloud cooldown failed")
+  );
+}
+
+#include "http_test_helpers.h"
+
+TEST_CASE("CloudQuota imports existing usage and validates ledger contents", "[cloud_quota]") {
+  const auto root = holder::test::make_temp_dir();
+  const auto ledger = root / "ledger.json";
+  auto db = holder::test::open_db_with_schema(root / "holder.db");
+  holder::api::support::restore_cloud_usage_ledger(db, ledger);
+  db.exec("INSERT INTO ai_cloud_usage_events VALUES('event','provider','model',2,3,5,10)");
+  holder::api::support::initialize_cloud_usage_ledger(db, ledger);
+  auto fresh = holder::test::open_db_with_schema(root / "fresh.db");
+  holder::api::support::initialize_cloud_usage_ledger(fresh, ledger);
+  CHECK(holder::api::support::load_cloud_window_usage(fresh, "provider", "model", 0).tokens == 5);
+  SECTION("unsupported format") {
+    std::ofstream(ledger) << R"({"version":2,"events":[]})";
+    REQUIRE_THROWS(holder::api::support::restore_cloud_usage_ledger(fresh, ledger));
+  }
+  SECTION("invalid event releases its prepared statement") {
+    std::ofstream(ledger) << R"({"version":1,"events":[{}]})";
+    REQUIRE_THROWS(holder::api::support::restore_cloud_usage_ledger(fresh, ledger));
+    for (auto* statement = sqlite3_next_stmt(fresh.handle(), nullptr); statement;
+         statement = sqlite3_next_stmt(fresh.handle(), statement)) {
+      CHECK(
+          std::string(sqlite3_sql(statement)).find("INSERT OR IGNORE INTO ai_cloud_usage_events") ==
+          std::string::npos
+      );
+    }
+  }
+  SECTION("missing restore schema") {
+    fresh.exec("DROP TABLE ai_cloud_usage_events");
+    REQUIRE_THROWS(holder::api::support::restore_cloud_usage_ledger(fresh, ledger));
+  }
+  SECTION("missing export schema") {
+    fresh.exec("DROP TABLE ai_cloud_usage_events");
+    REQUIRE_THROWS(holder::api::support::initialize_cloud_usage_ledger(fresh, root / "new.json"));
+  }
+}
+
+TEST_CASE("CloudQuota does not publish a ledger when its export query fails", "[cloud_quota]") {
+  const auto root = holder::test::make_temp_dir();
+  const auto ledger = root / "ledger.json";
+  auto db = holder::test::open_db_with_schema(root / "holder.db");
+  db.exec("INSERT INTO ai_cloud_usage_events VALUES('event','provider','model',1,2,3,4)");
+  sqlite3_progress_handler(db.handle(), 1, interrupt_sqlite, nullptr);
+  CHECK_THROWS_WITH(
+      holder::api::support::initialize_cloud_usage_ledger(db, ledger),
+      Catch::Matchers::ContainsSubstring("cloud usage export failed")
+  );
+  sqlite3_progress_handler(db.handle(), 0, nullptr, nullptr);
+  CHECK_FALSE(std::filesystem::exists(ledger));
+  holder::api::support::record_cloud_usage_event(db, "provider", "model", 1, 2, 5, "after-failure");
+  CHECK_FALSE(std::filesystem::exists(ledger));
+  for (auto* statement = sqlite3_next_stmt(db.handle(), nullptr); statement;
+       statement = sqlite3_next_stmt(db.handle(), statement)) {
+    CHECK_FALSE(sqlite3_stmt_busy(statement));
+  }
+}

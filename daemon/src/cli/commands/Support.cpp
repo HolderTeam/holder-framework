@@ -1,0 +1,590 @@
+#include "cli/commands/Support.h"
+
+#include "identity/Uuid.h"
+
+#include <boost/asio.hpp>
+#include <boost/process/v2/environment.hpp>
+#include <boost/process/v2/process.hpp>
+
+#if defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <shellapi.h>
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
+
+#include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <chrono>
+#include <ctime>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <optional>
+#include <sstream>
+#include <stdexcept>
+#include <unordered_map>
+#include <unordered_set>
+#include <vector>
+
+namespace holder::cli {
+
+std::string api_error_message(const HttpJsonResponse& response, const std::string& fallback) {
+  if (response.payload.contains("error") && response.payload["error"].contains("message")) {
+    return response.payload["error"]["message"].get<std::string>();
+  }
+  return fallback; // LCOV_EXCL_LINE: daemon error responses should carry error.message.
+}
+
+nlohmann::json list_projects_payload(const holder::core::Paths& paths, bool include_count) {
+  const auto connection = read_secure_daemon_connection(paths);
+  const std::string target = include_count ? "/projects?count=true" : "/projects";
+  const auto response = http_json_request(
+      connection,
+      boost::beast::http::verb::get,
+      target,
+      std::chrono::seconds(10) // LCOV_EXCL_LINE
+  );
+
+  if (response.status != boost::beast::http::status::ok || !response.payload.value("ok", false)) {
+    const auto fallback = "HTTP " + std::to_string(static_cast<unsigned>(response.status));
+    throw std::runtime_error("Projects request failed: " + api_error_message(response, fallback));
+  }
+
+  return response.payload;
+}
+
+std::filesystem::path holderctl_config_path(const holder::core::Paths& paths) {
+  return paths.config_dir / "holderctl.json";
+}
+
+bool is_home_project(const nlohmann::json& project) {
+  auto name = json_string(project, "name");
+  for (char& c : name) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return name == "home";
+}
+
+nlohmann::json find_home_project(const nlohmann::json& projects) {
+  for (const auto& project : projects) {
+    if (is_home_project(project)) {
+      return project;
+    }
+  }
+  throw std::runtime_error("Default Home project not found.");
+}
+
+namespace {
+
+// A fixed ".tmp" name would let two concurrent writers race on the same temp file
+// before either atomic rename happens, corrupting it. Make each writer's temp file
+// unique.
+std::string unique_temp_suffix() {
+  static std::atomic<unsigned long long> counter{0};
+#ifdef _WIN32
+  const auto pid = static_cast<unsigned long>(::GetCurrentProcessId());
+#else
+  const auto pid = static_cast<unsigned long>(::getpid());
+#endif
+  return "." + std::to_string(pid) + "." + std::to_string(counter.fetch_add(1));
+}
+
+} // namespace
+
+void write_holderctl_config(const holder::core::Paths& paths, const std::string& project_id) {
+  std::filesystem::create_directories(paths.config_dir);
+  const auto config_path = holderctl_config_path(paths);
+  const auto tmp_path = config_path.string() + ".tmp" + unique_temp_suffix();
+
+  nlohmann::json config;
+  config["current_project_id"] = project_id;
+  {
+    std::ofstream out(tmp_path, std::ios::trunc);
+    if (!out.is_open()) {
+      // LCOV_EXCL_START
+      throw std::runtime_error("Failed to open holderctl config: " + tmp_path);
+      // LCOV_EXCL_STOP
+    }
+    out << config.dump(2) << "\n";
+  }
+
+  std::error_code ec;
+  std::filesystem::rename(tmp_path, config_path, ec);
+  if (ec) {
+    // LCOV_EXCL_START
+    std::filesystem::remove(config_path, ec);
+    std::filesystem::rename(tmp_path, config_path, ec);
+    if (ec) {
+      throw std::runtime_error(
+          "Failed to write holderctl config: " + config_path.string() + " (" + ec.message() + ")"
+      );
+    }
+    // LCOV_EXCL_STOP
+  }
+} // LCOV_EXCL_LINE
+
+void reset_holderctl_config(const holder::core::Paths& paths) {
+  std::error_code ec;
+  std::filesystem::remove(holderctl_config_path(paths), ec);
+} // LCOV_EXCL_LINE
+
+std::optional<std::string> read_configured_project_id(const holder::core::Paths& paths) {
+  const auto config_path = holderctl_config_path(paths);
+  std::ifstream in(config_path);
+  if (!in.is_open()) {
+    return std::nullopt;
+  }
+  const auto config = nlohmann::json::parse(in);
+  auto project_id = json_string(config, "current_project_id");
+  if (project_id.empty()) {
+    return std::nullopt;
+  }
+  return project_id;
+} // LCOV_EXCL_LINE
+
+std::string read_current_project_id(const holder::core::Paths& paths) {
+  const auto configured_project_id = read_configured_project_id(paths);
+  if (configured_project_id.has_value()) {
+    return configured_project_id.value();
+  }
+
+  const auto payload = list_projects_payload(paths, false);
+  return json_string(find_home_project(payload.at("data")), "project_id");
+} // LCOV_EXCL_LINE
+
+nlohmann::json find_project_by_id(const nlohmann::json& projects, const std::string& project_id) {
+  for (const auto& project : projects) {
+    if (json_string(project, "project_id") == project_id) {
+      return project;
+    }
+  }
+  throw std::runtime_error("Current project no longer exists: " + project_id);
+} // LCOV_EXCL_LINE
+
+nlohmann::json resolve_project(const nlohmann::json& projects, const std::string& query) {
+  std::vector<nlohmann::json> name_matches;
+  for (const auto& project : projects) {
+    if (json_string(project, "project_id") == query) {
+      return project;
+    }
+    if (json_string(project, "name") == query) {
+      name_matches.push_back(project);
+    }
+  }
+
+  if (name_matches.size() == 1) {
+    return name_matches.front();
+  }
+  if (name_matches.size() > 1) {
+    throw CliError(
+        "ambiguous_project",
+        "Multiple projects named '" + query + "'; use the project id."
+    );
+  }
+  throw CliError("not_found", "Project not found: " + query);
+}
+
+std::string url_encode_component(const std::string& value) {
+  std::ostringstream out;
+  out << std::uppercase << std::hex;
+  for (const char ch : value) {
+    const auto c = static_cast<unsigned char>(ch);
+    const bool safe = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
+                      c == '-' || c == '_' || c == '.' || c == '~';
+    if (safe) {
+      out << static_cast<char>(c);
+    } else {
+      out << '%' << std::setw(2) << std::setfill('0') << static_cast<int>(c);
+    }
+  }
+  return out.str();
+}
+
+std::string join_args(int start, int argc, char* argv[]) {
+  std::string out;
+  for (int i = start; i < argc; ++i) {
+    if (!out.empty()) out += " ";
+    out += argv[i];
+  }
+  return out;
+} // LCOV_EXCL_LINE
+
+std::string read_stdin_all() {
+  std::ostringstream buffer;
+  buffer << std::cin.rdbuf();
+  return buffer.str();
+}
+
+std::string trim_ascii_whitespace(const std::string& value) {
+  const auto start = value.find_first_not_of(" \t\r\n");
+  if (start == std::string::npos) return "";
+  const auto end = value.find_last_not_of(" \t\r\n");
+  return value.substr(start, end - start + 1);
+}
+
+namespace {
+
+std::string first_non_empty_line(const std::string& text) {
+  std::istringstream in(text);
+  std::string line;
+  while (std::getline(in, line)) {
+    const auto trimmed = trim_ascii_whitespace(line);
+    if (!trimmed.empty()) {
+      return trimmed;
+    } // LCOV_EXCL_LINE: loop cleanup after the covered non-empty return.
+  } // LCOV_EXCL_LINE: getline cleanup after the loop's covered return path.
+  return ""; // LCOV_EXCL_LINE: command_new rejects all-whitespace content before title derivation.
+}
+
+} // namespace
+
+std::string title_from_content(const std::string& content) {
+  auto title = first_non_empty_line(content);
+  if (title.empty()) {
+    title = "Untitled"; // LCOV_EXCL_LINE: command_new rejects all-whitespace content before title
+                        // derivation.
+  }
+  constexpr std::size_t kMaxTitleLength = 80;
+  if (title.size() > kMaxTitleLength) {
+    title = title.substr(0, kMaxTitleLength);
+  }
+  return title;
+} // LCOV_EXCL_LINE
+
+void trim_trailing_line_breaks(std::string& text) {
+  while (!text.empty() && (text.back() == '\n' || text.back() == '\r')) {
+    text.pop_back();
+  }
+}
+
+long long now_epoch_seconds() { return static_cast<long long>(std::time(nullptr)); }
+
+std::string lower_ascii(std::string value) {
+  for (char& c : value) {
+    c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+  }
+  return value;
+}
+
+bool contains_case_insensitive(const std::string& haystack, const std::string& needle) {
+  return lower_ascii(haystack).find(lower_ascii(needle)) != std::string::npos;
+}
+
+#if defined(_WIN32)
+namespace {
+
+std::wstring utf8_to_wide_for_shell(const std::string& value) {
+  const int required =
+      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.c_str(), -1, nullptr, 0);
+  if (required <= 0) {
+    throw std::runtime_error("Failed to convert URI to UTF-16 for ShellExecuteW");
+  }
+
+  std::wstring out(static_cast<std::size_t>(required), L'\0');
+  const int written =
+      MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.c_str(), -1, out.data(), required);
+  if (written != required) {
+    throw std::runtime_error("Failed to write UTF-16 URI for ShellExecuteW");
+  }
+  if (!out.empty() && out.back() == L'\0') {
+    out.pop_back();
+  }
+  return out;
+}
+
+void open_external_uri_windows(const std::string& uri) {
+  const auto wide_uri = utf8_to_wide_for_shell(uri);
+  const HINSTANCE result =
+      ShellExecuteW(nullptr, L"open", wide_uri.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+  const auto code = reinterpret_cast<INT_PTR>(result);
+  if (code <= 32) {
+    std::cout << uri << "\n";
+    throw std::runtime_error("ShellExecuteW failed with code " + std::to_string(code));
+  }
+}
+
+} // namespace
+#endif
+
+std::string desktop_opener_name() {
+#if defined(__APPLE__)
+  return "open";
+#elif !defined(_WIN32)
+  return "xdg-open";
+#else
+  return "";
+#endif
+}
+
+void open_external_uri(const std::string& uri) {
+#if defined(_WIN32)
+  open_external_uri_windows(uri);
+#else
+  const auto opener_name = desktop_opener_name();
+  if (opener_name.empty()) {
+    // LCOV_EXCL_START: only reached on platforms without a desktop opener implementation.
+    std::cout << uri << "\n";
+    throw std::runtime_error("open is not supported on this platform yet");
+    // LCOV_EXCL_STOP
+  }
+
+  const auto opener = boost::process::v2::environment::find_executable(opener_name);
+  if (opener.empty()) {
+    std::cout << uri << "\n"; // LCOV_EXCL_LINE: depends on host PATH contents.
+    throw std::runtime_error(opener_name + " not found"); // LCOV_EXCL_LINE
+  }
+
+  boost::asio::io_context ioc;
+  boost::process::v2::process proc(ioc.get_executor(), opener, {uri});
+
+  boost::system::error_code ec;
+  const int exit_code = proc.wait(ec);
+  if (ec) {
+    // LCOV_EXCL_START: requires process wait syscall failure.
+    std::cout << uri << "\n";
+    throw std::runtime_error("Failed to run " + opener_name + ": " + ec.message());
+    // LCOV_EXCL_STOP
+  }
+  if (exit_code != 0) {
+    std::cout << uri << "\n";
+    throw std::runtime_error(opener_name + " failed with exit code " + std::to_string(exit_code));
+  }
+#endif
+}
+
+nlohmann::json recovery_token_request(
+    const holder::core::Paths& paths,
+    boost::beast::http::verb method,
+    const std::string& target,
+    const nlohmann::json& body
+) {
+  const auto connection = read_secure_daemon_connection(paths);
+  const auto response = http_json_request(
+      connection,
+      method,
+      target,
+      std::chrono::seconds(30), // LCOV_EXCL_LINE: exercised through generic JSON request helpers.
+      std::optional<nlohmann::json>{body}
+  );
+
+  if ((response.status != boost::beast::http::status::ok &&
+       response.status != boost::beast::http::status::created) ||
+      !response.payload.value("ok", false)) {
+    const auto fallback = "HTTP " + std::to_string(static_cast<unsigned>(response.status));
+    throw std::runtime_error(api_error_message(response, fallback));
+  }
+
+  return response.payload;
+}
+
+nlohmann::json require_current_project_payload(const holder::core::Paths& paths) {
+  const auto current_project_id = read_current_project_id(paths);
+  const auto projects_payload = list_projects_payload(paths, false);
+  return find_project_by_id(projects_payload.at("data"), current_project_id);
+}
+
+namespace {
+
+std::string card_reference_scope_name(CardReferenceScope scope) {
+  switch (scope) {
+  case CardReferenceScope::Live:
+    return "live";
+  case CardReferenceScope::Trashed:
+    return "trashed";
+  case CardReferenceScope::Either:
+    return "either";
+  }
+  return {}; // LCOV_EXCL_LINE
+}
+
+// LCOV_EXCL_START: only called for daemon protocol violations covered at each call site.
+std::runtime_error invalid_card_reference_response() {
+  return std::runtime_error("Invalid card reference response from daemon.");
+}
+// LCOV_EXCL_STOP
+
+} // namespace
+
+std::string resolve_card_reference(
+    const holder::core::Paths& paths,
+    const std::string& project_id,
+    const std::string& reference,
+    CardReferenceScope scope
+) {
+  const auto connection = read_secure_daemon_connection(paths);
+  const auto response = http_json_request(
+      connection,
+      boost::beast::http::verb::post,
+      "/card-references/resolve",
+      std::chrono::seconds(10), // LCOV_EXCL_LINE
+      nlohmann::json{
+          {"project_id", project_id},
+          {"reference", reference},
+          {"scope", card_reference_scope_name(scope)},
+      }
+  );
+
+  if (response.status != boost::beast::http::status::ok || !response.payload.value("ok", false)) {
+    const auto fallback = "HTTP " + std::to_string(static_cast<unsigned>(response.status));
+    throw std::runtime_error(
+        "Card reference request failed: " + api_error_message(response, fallback)
+    );
+  }
+  if (!response.payload.contains("data") || !response.payload.at("data").is_object()) {
+    throw invalid_card_reference_response(); // LCOV_EXCL_LINE
+  }
+
+  const auto& data = response.payload.at("data");
+  const auto status = json_string(data, "status");
+  if (status == "resolved") {
+    if (!data.contains("card") || !data.at("card").is_object()) {
+      throw invalid_card_reference_response(); // LCOV_EXCL_LINE
+    }
+    const auto card_id = json_string(data.at("card"), "card_id");
+    if (card_id.empty()) {
+      throw invalid_card_reference_response(); // LCOV_EXCL_LINE
+    }
+    return card_id;
+  } // LCOV_EXCL_LINE: return-path cleanup duplicate.
+
+  if (status == "ambiguous") {
+    if (!data.contains("candidates") || !data.at("candidates").is_array()) {
+      throw invalid_card_reference_response(); // LCOV_EXCL_LINE
+    }
+    const auto& candidates = data.at("candidates");
+    std::vector<std::string> candidate_ids;
+    candidate_ids.reserve(candidates.size());
+    for (const auto& candidate : candidates) {
+      candidate_ids.push_back(json_string(candidate, "card_id"));
+    }
+    const auto displayed_ids = display_card_ids(candidate_ids);
+
+    std::ostringstream human_message;
+    human_message << "Card reference is ambiguous in the current project: " << reference
+                  << "\nCandidates:";
+    for (std::size_t i = 0; i < candidates.size(); ++i) {
+      const auto& candidate = candidates.at(i);
+      human_message << "\n  " << displayed_ids.at(i) << "\t" << json_string(candidate, "title");
+      if (candidate.contains("deleted_at") && !candidate.at("deleted_at").is_null()) {
+        human_message << "\t(trashed)";
+      }
+    }
+    throw CliError(
+        "card_reference_ambiguous",
+        "Card reference is ambiguous in the current project.",
+        {{"reference", reference}, {"candidates", candidates}},
+        human_message.str() // LCOV_EXCL_LINE: exception-constructor cleanup duplicate.
+    );
+  }
+
+  if (status == "not_found") {
+    throw CliError(
+        "card_reference_not_found",
+        "Card was not found in the current project.",
+        {{"reference", reference}},
+        "Card not found in current project: " + reference // LCOV_EXCL_LINE
+    );
+  }
+  throw invalid_card_reference_response(); // LCOV_EXCL_LINE
+}
+
+std::vector<std::string> display_card_ids(const std::vector<std::string>& card_ids) {
+  constexpr std::size_t kInitialLength = 8;
+  std::vector<std::size_t> lengths;
+  lengths.reserve(card_ids.size());
+  for (const auto& card_id : card_ids) {
+    lengths.push_back(
+        holder::identity::is_valid_uuid(card_id) ? std::min(kInitialLength, card_id.size())
+                                                 : card_id.size()
+    );
+  }
+
+  for (;;) {
+    std::unordered_map<std::string, std::vector<std::size_t>> groups;
+    for (std::size_t i = 0; i < card_ids.size(); ++i) {
+      groups[card_ids.at(i).substr(0, lengths.at(i))].push_back(i);
+    }
+
+    bool grew = false;
+    for (const auto& [prefix, indices] : groups) {
+      (void)prefix;
+      if (indices.size() < 2) continue;
+
+      std::unordered_set<std::string> distinct_ids;
+      for (const auto index : indices) {
+        distinct_ids.insert(card_ids.at(index));
+      }
+      if (distinct_ids.size() < 2) continue;
+
+      for (const auto index : indices) {
+        if (lengths.at(index) < card_ids.at(index).size()) {
+          ++lengths.at(index);
+          grew = true;
+        }
+      }
+    }
+    if (!grew) break;
+  }
+
+  std::vector<std::string> displayed_ids;
+  displayed_ids.reserve(card_ids.size());
+  for (std::size_t i = 0; i < card_ids.size(); ++i) {
+    displayed_ids.push_back(card_ids.at(i).substr(0, lengths.at(i)));
+  }
+  return displayed_ids;
+}
+
+std::string display_card_id(const std::string& card_id) {
+  return display_card_ids({card_id}).front();
+}
+
+nlohmann::json card_api_request(
+    const holder::core::Paths& paths,
+    boost::beast::http::verb method,
+    const std::string& target,
+    const nlohmann::json& body,
+    boost::beast::http::status success
+) {
+  const auto connection = read_secure_daemon_connection(paths);
+  const auto response = method == boost::beast::http::verb::get
+                            ? http_json_request(
+                                  connection,
+                                  method,
+                                  target,
+                                  std::chrono::seconds(10) // LCOV_EXCL_LINE
+                              )
+                            : http_json_request(
+                                  connection,
+                                  method,
+                                  target,
+                                  std::chrono::seconds(30), // LCOV_EXCL_LINE
+                                  std::optional<nlohmann::json>{body}
+                              );
+
+  if (response.status != success || !response.payload.value("ok", false)) {
+    const auto fallback = "HTTP " +
+                          std::to_string(static_cast<unsigned>(response.status)
+                          ); // LCOV_EXCL_LINE: covered failures carry structured messages.
+    const auto message = api_error_message(response, fallback);
+    std::string code = "api_request_failed";
+    nlohmann::json details = nlohmann::json::object();
+    if (response.payload.contains("error") && response.payload.at("error").is_object()) {
+      const auto& error = response.payload.at("error");
+      code = json_string(error, "code", code);
+      if (error.contains("details")) details = error.at("details");
+    }
+    throw CliError(code, message, std::move(details), message);
+  } // LCOV_EXCL_LINE
+
+  return response.payload;
+}
+
+} // namespace holder::cli

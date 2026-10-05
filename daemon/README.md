@@ -1,0 +1,319 @@
+# Holder Local Daemon
+
+Holderd is a local-first card server, primarily used as a backend for card applications.
+
+## What You Need
+
+- CMake 3.22+
+- Ninja
+- C++20 compiler (GCC/Clang/MSVC)
+- Git
+- Python 3 (for automatic core SDK selection)
+
+Runtime/build dependencies used by this repo:
+
+- Boost 1.83+ (Asio/Beast headers, Filesystem, and Process)
+- OpenSSL
+- SQLite3
+- nlohmann-json
+- spdlog
+- yaml-cpp
+- libgit2
+- md4c
+- libsodium
+- platform keyring support: libsecret on Linux, Keychain on macOS, Credential Manager on Windows
+- Catch2 (for the default test-enabled build)
+
+`./make.sh` also handles the `caste` dependency:
+
+- Git clone: initializes submodule automatically.
+- ZIP download: fetches pinned `caste` archive (requires `curl` or `wget`).
+
+Coverage tooling (optional):
+
+- lcov (`lcov`, `genhtml`)
+
+## Building
+
+`./make.sh` builds, runs the tests, then starts `holderd`.
+It downloads core on the first build and reuses it afterwards.
+Run `./make.sh core-update` to get a newer version. On Fedora, it builds
+`../../holder-core` instead.
+
+```sh
+./make.sh build               # Build without starting the daemon
+./make.sh test                # Build and run the tests
+```
+
+See [core build options](docs/core-builds.md) for version pins, source builds,
+SDK overrides and release builds.
+
+Model catalog config lives at `config/models.yaml` and is served by the API at `/models.yaml`.
+
+## Optional Runtime Dependencies
+
+- Ollama (for local model execution via AI routes)
+  - Not required to build or run the core card/project APIs.
+  - Backend looks for `ollama` on `PATH` and connects to `127.0.0.1:11434` by default.
+  - Override host/port with `HOLDER_MODEL_RUNNER_HOST` and `HOLDER_MODEL_RUNNER_PORT`.
+
+## Quick Start (Ubuntu)
+
+The idea is that it should work on any OS.
+
+If you want to contribue instructions for your distro/Operating System,
+that would be very welcome.
+
+But here are friendly instructions for development on Ubuntu.
+
+```bash
+sudo apt update
+sudo apt install -y \
+  build-essential cmake ninja-build pkg-config git curl python3 \
+  libboost-system-dev libboost-filesystem-dev \
+  libssl-dev \
+  libsqlite3-dev nlohmann-json3-dev libspdlog-dev libyaml-cpp-dev \
+  libgit2-dev libmd4c-dev catch2 libsodium-dev \
+  libsecret-1-dev \
+  lcov
+
+./make.sh
+```
+
+Server will start at `127.0.0.1:11499` by default and print docs URL + auth token in the terminal log.
+
+## Quick Start (Fedora)
+
+```sh
+sudo dnf install -y \
+  gcc-c++ cmake ninja-build pkgconf-pkg-config git curl ccache python3 \
+  boost-devel openssl-devel sqlite-devel json-devel spdlog-devel yaml-cpp-devel \
+  'pkgconfig(libgit2)' md4c-devel catch-devel libsodium-devel libsecret-devel \
+  clang18-tools-extra
+
+# If holder-core is not already checked out beside holder-framework:
+git clone https://github.com/HolderTeam/holder-core.git ../../holder-core
+./make.sh
+```
+
+`boost-devel` supplies the Boost headers and compiled libraries. `json-devel`
+supplies nlohmann-json, and `catch-devel` supplies Catch2. The quoted
+`pkgconfig(libgit2)` capability selects the development package across Fedora
+package naming changes (Fedora 45 prerelease uses `libgit2_1.9-devel`).
+
+`make.sh` automatically enables ccache when available. Use `HOLDER_CCACHE=1` to
+require it, and `ccache --show-stats` to inspect cache use.
+
+Optional coverage tools (`gcovr` adds the JSON report):
+
+```sh
+sudo dnf install -y lcov gcovr valgrind clang-tools-extra
+```
+
+On Fedora with GCC 16 headers, use the current Clang tools for static analysis;
+Clang 18 cannot parse those headers. Keep Clang 18 for the repository's formatting:
+
+```sh
+HOLDER_CLANG_TIDY=clang-tidy HOLDER_RUN_CLANG_TIDY=run-clang-tidy ./make.sh tidy
+./make.sh format-check
+```
+
+Memcheck defaults to a 900-second timeout per test. Set `HOLDER_CTEST_TIMEOUT`
+to override it. To retain separate address/undefined and thread sanitizer builds:
+
+```sh
+HOLDER_SAN_DETECT_LEAKS=1 ./make.sh san address,undefined
+HOLDER_SAN_BUILD_DIR=build-tsan ./make.sh san thread
+```
+
+On Fedora, an uninstrumented glibc can produce a ThreadSanitizer report in
+`tzset_internal` during concurrent libgit2 signature creation. If the report matches
+the documented internal-lock case in holder-core, rerun with its explicit suppression:
+
+```sh
+HOLDER_SAN_BUILD_DIR=build-tsan \
+  HOLDER_TSAN_SUPPRESSIONS="$PWD/../../holder-core/tools/tsan/glibc.supp" \
+  HOLDER_CTEST_TIMEOUT=900 ./make.sh san thread
+```
+
+This suppression is opt-in and does not cover Holder code. See the rationale and
+source references in [glibc.supp](../../holder-core/tools/tsan/glibc.supp).
+
+## Quick Start (FreeBSD)
+
+```sh
+sudo pkg install \
+  cmake ninja pkgconf git curl \
+  boost-libs openssl sqlite3 nlohmann-json spdlog yaml-cpp \
+  libgit2 md4c catch2 libsodium
+
+./make.sh
+```
+
+## Quick Start (Mac OS)
+
+```sh
+brew install boost openssl@3 sqlite nlohmann-json spdlog yaml-cpp libgit2 md4c catch2 libsodium lcov
+
+./make.sh
+```
+
+## Quick Start (Windows)
+
+I compiled it using Visual Studio (below), but there is a command line way
+if you are an established dev on Windows and know what you are doing.
+
+### Command line version
+
+You may need this:
+
+```powershell
+$env:VCPKG_ROOT = "C:\Program Files\Microsoft Visual Studio\18\Community\VC\vcpkg"
+```
+
+#### Build
+
+```powershell
+
+cmake --preset windows-vcpkg-debug
+cmake --build --preset windows-vcpkg-debug
+```
+
+The executables will be under `out/build/windows-vcpkg-debug/`
+
+#### Test run:
+
+```powershell
+cmake --preset windows-vcpkg-tests-debug
+cmake --build --preset windows-vcpkg-tests-debug
+ctest --preset windows-vcpkg-tests-debug
+```
+
+From a Windows Bash environment with the MSVC developer environment and
+`VCPKG_ROOT` configured, the portable project commands are also available:
+
+```bash
+./make.sh build
+./make.sh test
+```
+
+Some tests are skipped on Windows because they specifically check POSIX permission bits, symlink
+failure behavior, or Unix-style build-directory discovery.
+
+### Visual Studio version
+
+Install classic Visual Studio.
+
+The following instructions are for the "Visual Studio Community" not "Visual Studio Code".
+The one with the purple logo not the blue logo.
+You probably can do it with the blue one but not with these instructions.
+
+The installer gives you a choice of "Workloads".
+Choose "Desktop Development with C++" and
+accept all the options it preselects (the desktop/CMake tools).
+
+Check out this repo with Git. Visual Studio will automatically configure it with CMake.
+
+The first configure will take a long time as vcpkg builds the dependencies and their dependencies and so on down to the centre of the Earth (think npm or pip).
+
+It is not as verbose as some other build tools, but if it looks frozen at any point, open the Windows Task Manager and you will see if it's busy or not.
+
+You can also look at the installed dependency tree at `../.vcpkg-holder-daemon` and see it filling up with the
+best of the last forty years of open source. It will take about 2GB.
+
+### Building the application
+
+Under the configurations drop-down choose `windows-vcpkg-debug`.
+
+Then under the "Build" menu choose "Build All".
+
+This builds the local server `holderd.exe` and the command line interface `holderctl.exe`.
+
+Run them by selecting them as debug targets and using the Debug menu (or F5) or just run them in the command line.
+
+### Running the test suite.
+
+Under the configurations drop-down, choose `windows-vcpkg-tests-debug`
+
+Then under the "Build" menu choose "Build All".
+
+Then under the "Test" menu, go to the submenu "Run Test Preset for windows-vcpkg-tests-debug"
+then click on "windows-vcpkg-tests-debug"
+
+## Useful Commands (Linux/BSD/Mac)
+
+```bash
+./make.sh --help          # list supported build/test commands
+./make.sh                 # configure + build + tests + run holder
+./make.sh build           # configure + build without launching holderd
+./make.sh test            # configure + build + automated tests
+./make.sh Debug           # debug build
+./make.sh coverage        # build + run tests + generate HTML coverage report
+./make.sh warnings        # build holderd + holderctl with warnings as errors
+./make.sh memcheck        # Valgrind memcheck; slow, excludes timing-sensitive tests
+./make.sh san             # ASan build + tests
+HOLDER_SAN_DETECT_LEAKS=1 ./make.sh san  # ASan + LSan build + tests
+./make.sh san address,undefined  # ASan + UBSan build + tests
+./make.sh san thread      # TSan build + tests
+./build/holderd --help
+./build/holderd --reindex
+./scripts/cloud-smoke.sh --provider switchyard --token "$HOLDER_TOKEN" --api-key "$SWITCHYARD_API_KEY"
+./scripts/factory-reset.sh --force  # This wipes all user data, useful for development and testing the onboarding path. Warning: don't use on the actual holder instance you use as a user.
+```
+
+The opt-in local MinIO and hosted S3-compatible storage test is documented in
+[`docs/s3-compatible-smoke-test.md`](docs/s3-compatible-smoke-test.md).
+
+With GCC 16, an ASan build can emit `-Wmaybe-uninitialized` warnings for
+`_M_invoker` and `_M_manager` in libstdc++'s regex headers when compiling core's
+`TagExtractor.cpp`. The same 14 warnings reproduce in a standalone `std::regex`
+program with `-O1 -fsanitize=address`, while the build without ASan is clean.
+This matches [GCC PR105616](https://gcc.gnu.org/pipermail/gcc-bugs/2022-November/804201.html);
+[GCC's documentation](https://gcc.gnu.org/onlinedocs/gcc/Instrumentation-Options.html)
+also notes that sanitizers can increase false-positive uninitialized warnings.
+Keep other compiler warnings and runtime sanitizer reports enabled.
+
+`./make.sh san` enables ASan only and defaults to leak detection being off. For
+ASan, UBSan, and leak detection together, run:
+
+```sh
+HOLDER_SAN_DETECT_LEAKS=1 ./make.sh san address,undefined
+```
+
+## Event streams
+
+The authenticated change feed and AI streams support asynchronous subscriptions
+with bounded output and explicit reconnect recovery. See
+[the event-stream contract](docs/event-streams.md) for snapshot synchronization,
+Git revisions, replay limits and client behavior.
+
+## Project removal and upgrades
+
+Removing a project through the API removes it from this device's database and
+records that choice in the local project registry. Startup and database rebuilding
+leave it removed, even when its files remain on disk. Files and encryption keys
+are retained so the project can be explicitly imported again. If no projects
+remain, the next startup creates a new encrypted Home with its own identity and key.
+
+Existing version 1 registries are read automatically. The first project removal
+upgrades the registry to version 2 to preserve removal records. Older daemon
+versions cannot read version 2; downgrading after a removal is unsupported.
+Keep the local registry alongside the device configuration when backing up or
+restoring an installation, since project files alone do not record local removals.
+
+The Home lifecycle tests cover restarts, schema upgrades, database reconstruction,
+missing and leftover keys, removal failures, and explicit recovery. They use an
+isolated test keystore; native Keychain permissions and app signing changes still
+need testing on macOS.
+
+## Daemons.
+
+In computing, a daemon is a program that runs as a background process,
+rather than being under the direct control of an interactive user.
+Sometimes this is called a service, a server or a backend,
+but the original term from 1963 is a daemon,
+based on the Ancient Greek word δαίμων.
+This is a different word than demon, used in later Christian tradition for fallen angel.
+Socrates described a daemon as an "attendant, ministering, or indwelling spirit; genius",
+more like the Holy Spirit.
+Demons are baddies, daemons are goodies.

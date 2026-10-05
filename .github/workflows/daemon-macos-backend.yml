@@ -1,0 +1,135 @@
+name: macOS backend
+
+on:
+  workflow_call:
+    inputs:
+      core_commit:
+        required: true
+        type: string
+      build_type:
+        description: SDK and daemon configuration
+        type: string
+        default: RelWithDebInfo
+      daemon_commit:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Check out holder-framework
+        uses: actions/checkout@v4
+        with:
+          repository: HolderTeam/holder-framework
+          ref: ${{ inputs.daemon_commit }}
+          persist-credentials: false
+
+      - name: Prepare caste source dependency
+        shell: bash
+        working-directory: daemon
+        run: git submodule update --init --recursive -- submodules/caste
+
+      - uses: HolderTeam/holder-core/.github/actions/core-sdk@main
+        with:
+          commit: ${{ inputs.core_commit }}
+          build-type: ${{ inputs.build_type }}
+
+      - name: Install dependencies
+        working-directory: daemon
+        run: |
+          set -euo pipefail
+
+          brew update
+          brew install \
+            cmake \
+            ninja \
+            pkg-config \
+            boost \
+            catch2 \
+            nlohmann-json \
+            yaml-cpp \
+            spdlog \
+            sqlite \
+            libsodium \
+            libgit2 \
+            md4c \
+            openssl@3
+
+      - name: Configure CMake
+        working-directory: daemon
+        run: |
+          brew_prefix="$(brew --prefix)"
+          openssl_prefix="$(brew --prefix openssl@3)"
+
+          cmake \
+            -S . \
+            -B build-macos \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE="$HOLDER_CORE_BUILD_TYPE" \
+            -DCMAKE_PREFIX_PATH="${brew_prefix};${openssl_prefix}" \
+            -DOPENSSL_ROOT_DIR="${openssl_prefix}" \
+            -DBUILD_TESTING=ON
+
+      - name: Build backend executables and tests
+        working-directory: daemon
+        run: cmake --build build-macos --parallel
+
+      - name: Run tests
+        working-directory: daemon
+        run: ctest --test-dir build-macos --output-on-failure
+
+      - name: Stage backend artifact
+        working-directory: daemon
+        run: |
+          set -euo pipefail
+
+          build_dir="build-macos"
+          stage_dir="out/artifacts/macos-backend"
+
+          rm -rf "${stage_dir}"
+          mkdir -p "${stage_dir}/bin"
+
+          cp "${build_dir}/holderd" "${stage_dir}/bin/"
+          cp "${build_dir}/holderctl" "${stage_dir}/bin/"
+          cp -a "${build_dir}/schema" "${stage_dir}/"
+          cp -a config "${stage_dir}/"
+          cp -a assets "${stage_dir}/"
+          cp openapi.yaml "${stage_dir}/"
+          cp "${build_dir}/core-build.json" "${stage_dir}/"
+          mkdir -p "${stage_dir}/release"
+          git rev-parse HEAD > "${stage_dir}/release/holder-daemon-commit.txt"
+          tr -d '[:space:]' < VERSION > "${stage_dir}/release/holder-daemon-version.txt"
+          tr -d '[:space:]' < API_VERSION > "${stage_dir}/release/holder-daemon-api-version.txt"
+
+          (
+            cd "${stage_dir}"
+            find . -type f \
+              | sed 's#^\./##' \
+              | sort \
+              > manifest.txt
+          )
+
+          find "${stage_dir}" -type f | sort
+
+      - name: Smoke-test staged executables
+        working-directory: daemon
+        run: |
+          set -euo pipefail
+
+          cd out/artifacts/macos-backend
+          ./bin/holderd --help
+          ./bin/holderd --version
+          ./bin/holderctl --help
+
+      - name: Upload backend artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: holder-daemon-macos-backend${{ inputs.build_type == 'Release' && '-release' || '' }}
+          path: daemon/out/artifacts/macos-backend/**
+          if-no-files-found: error
+          retention-days: 7
