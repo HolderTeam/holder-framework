@@ -21,3 +21,7 @@ Download Holder for Windows, macOS or Linux from [holder.team](https://holder.te
 - [`launcher/`](launcher/) - the launcher that starts the Holder backend and opens the desktop app.
 - [`staging/`](staging/) - assembles and checks build artifacts for each platform.
 - [`release/`](release/) - signing, verification and publishing of releases.
+
+## Licence
+
+Holder Framework is free software, licensed under the GNU General Public License, version 3. See [LICENSE](LICENSE).
