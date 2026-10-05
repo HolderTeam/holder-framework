@@ -85,8 +85,9 @@ struct EnsureResult {
 EnsureOptions parse_ensure_options(int argc, char* argv[]);
 
 // Where a daemon started by ensure runs. It looks for its data (schema, config) in its working
-// directory, so this is the directory that holds them in each layout: share/holder-daemon in an
-// installed layout, Contents/Resources in a macOS app bundle, and otherwise beside the binary.
+// directory, so this is the directory that holds them in each layout: share/holder-daemon in a
+// Linux install, the directory above bin/ in a macOS app bundle (Contents/Resources) or a Windows
+// install, and otherwise beside the binary.
 std::filesystem::path default_daemon_working_dir(const std::filesystem::path& daemon);
 
 EnsureResult ensure_daemon(const holder::core::Paths& paths, const EnsureOptions& options);

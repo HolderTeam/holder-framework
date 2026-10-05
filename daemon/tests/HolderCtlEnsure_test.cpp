@@ -72,9 +72,28 @@ TEST_CASE("a macOS app bundle starts the daemon in Contents/Resources", "[ensure
   REQUIRE(holder::cli::default_daemon_working_dir(resources / "bin" / "holderd") == resources);
 }
 
-TEST_CASE("only a real app bundle counts as one", "[ensure][workdir]") {
-  // A development tree has schema/ and config/ one level up from build/ too; it must keep
-  // starting the daemon in build/.
+TEST_CASE("a Windows install starts the daemon in the install directory", "[ensure][workdir]") {
+  // <install>\bin\holderd.exe, with schema\, config\ and assets\ in <install>.
+  const auto install = holder::test::make_temp_dir() / "Programs" / "Holder";
+  make_dirs(install / "bin");
+  make_dirs(install / "schema");
+  make_dirs(install / "config");
+  make_dirs(install / "assets");
+  REQUIRE(holder::cli::default_daemon_working_dir(install / "bin" / "holderd.exe") == install);
+}
+
+TEST_CASE("a bin directory without the daemon's data stays where it is", "[ensure][workdir]") {
+  const auto root = holder::test::make_temp_dir();
+  make_dirs(root / "bin");
+  REQUIRE(holder::cli::default_daemon_working_dir(root / "bin" / "holderd") == root / "bin");
+
+  // Only one of the two data directories is not enough.
+  make_dirs(root / "schema");
+  REQUIRE(holder::cli::default_daemon_working_dir(root / "bin" / "holderd") == root / "bin");
+}
+
+TEST_CASE("a development tree keeps starting the daemon in build/", "[ensure][workdir]") {
+  // daemon/ has schema/ and config/ one level above build/, as an install has above bin/.
   const auto root = holder::test::make_temp_dir();
   make_dirs(root / "daemon" / "build");
   make_dirs(root / "daemon" / "schema");
@@ -83,18 +102,6 @@ TEST_CASE("only a real app bundle counts as one", "[ensure][workdir]") {
       holder::cli::default_daemon_working_dir(root / "daemon" / "build" / "holderd") ==
       root / "daemon" / "build"
   );
-
-  // A Resources directory outside Contents, or a bundle without the daemon's data, is not one.
-  make_dirs(root / "Resources" / "bin");
-  make_dirs(root / "Resources" / "schema");
-  make_dirs(root / "Resources" / "config");
-  REQUIRE(
-      holder::cli::default_daemon_working_dir(root / "Resources" / "bin" / "holderd") ==
-      root / "Resources" / "bin"
-  );
-  const auto bare = root / "Bare.app" / "Contents" / "Resources";
-  make_dirs(bare / "bin");
-  REQUIRE(holder::cli::default_daemon_working_dir(bare / "bin" / "holderd") == bare / "bin");
 }
 
 TEST_CASE("ensure parses dotted API versions", "[ensure]") {

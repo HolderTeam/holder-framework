@@ -398,10 +398,10 @@ std::filesystem::path default_daemon_working_dir(const std::filesystem::path& da
   const auto root = daemon.parent_path().parent_path();
   const auto installed = root / "share" / "holder-daemon";
   if (std::filesystem::is_directory(installed, ec)) return installed;
-  // A macOS app bundle keeps it in Contents/Resources, with the daemon in Resources/bin. Only a
-  // real bundle counts: a development tree also has schema/ and config/ above build/.
-  if (root.filename() == "Resources" && root.parent_path().filename() == "Contents" &&
-      root.parent_path().parent_path().extension() == ".app" &&
+  // The macOS app bundle (Contents/Resources/bin/holderd) and the Windows install
+  // (<install>\bin\holderd.exe) keep the data in the directory above bin/. Only a directory
+  // named bin counts: a development tree also has schema/ and config/ above build/.
+  if (daemon.parent_path().filename() == "bin" &&
       std::filesystem::is_directory(root / "schema", ec) &&
       std::filesystem::is_directory(root / "config", ec)) {
     return root;
