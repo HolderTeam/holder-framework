@@ -37,7 +37,7 @@ def main():
     args = parser.parse_args()
     suffix = args.platform
     with open(os.environ["GITHUB_OUTPUT"], "a") as output:
-        for component in ("desktop", "backend", "launcher"):
+        for component in ("desktop", "backend"):
             repository = os.environ[component.upper() + "_REPOSITORY"]
             workflow = f"{suffix}-{component}.yml"
             if component == "backend":

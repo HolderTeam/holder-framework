@@ -5,23 +5,25 @@ For a whole-framework RC or production release, use one
 [framework release manifest](docs/framework-release-manifest.md) across Linux,
 Windows and macOS. It pins one core SDK revision/configuration, product version
 and each platform's component runs and source commits. Release manifests require
-Release backend/core and launcher artifacts and release Meson desktop artifacts.
+Release backend/core artifacts and release Meson desktop artifacts.
 Normal development staging continues to follow latest-green.
 
 ## Windows
 
-The `Staging / Windows` workflow assembles the three Windows build outputs into a release-candidate layout:
+The `Staging / Windows` workflow assembles the two Windows build outputs into a release-candidate layout:
 
 - `holder-desktop-windows` from `HolderTeam/holder-desktop`
 - `holder-daemon-windows-backend` from core's downstream integration run
-- `holder-launcher-windows` from this repository's `windows-launcher.yml` (source in `launcher/`)
+
+The desktop is the program the installer's shortcuts start (`bin\holder-desktop.exe`); it starts its own
+backend with `holderctl ensure`. There is no launcher.
 
 Run it manually from:
 
 https://github.com/HolderTeam/holder-framework/actions/workflows/staging-windows-stage.yml
 
 By default, staging resolves core's latest-green SDK and selects successful
-desktop, core daemon-integration and launcher runs on main. All selected
+desktop and core daemon-integration runs on main. All selected
 artifacts must be unexpired. An explicit core tag/SHA and component run IDs
 support reproducible staging. Desktop installer metadata is checked out at the
 selected desktop run's commit. A backend built against another core revision
