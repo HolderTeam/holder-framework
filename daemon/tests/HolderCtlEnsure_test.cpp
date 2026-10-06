@@ -38,6 +38,72 @@ std::vector<unsigned long> version(const std::string& text) {
 
 } // namespace
 
+namespace {
+
+std::filesystem::path make_dirs(const std::filesystem::path& path) {
+  std::filesystem::create_directories(path);
+  return path;
+}
+
+} // namespace
+
+TEST_CASE("the daemon starts beside its binary when nothing says otherwise", "[ensure][workdir]") {
+  const auto root = holder::test::make_temp_dir();
+  make_dirs(root / "build");
+  REQUIRE(holder::cli::default_daemon_working_dir(root / "build" / "holderd") == root / "build");
+}
+
+TEST_CASE("an installed layout starts the daemon in share/holder-daemon", "[ensure][workdir]") {
+  const auto root = holder::test::make_temp_dir();
+  make_dirs(root / "bin");
+  make_dirs(root / "share" / "holder-daemon");
+  REQUIRE(
+      holder::cli::default_daemon_working_dir(root / "bin" / "holderd") ==
+      root / "share" / "holder-daemon"
+  );
+}
+
+TEST_CASE("a macOS app bundle starts the daemon in Contents/Resources", "[ensure][workdir]") {
+  const auto root = holder::test::make_temp_dir();
+  const auto resources = root / "Holder.app" / "Contents" / "Resources";
+  make_dirs(resources / "bin");
+  make_dirs(resources / "schema");
+  make_dirs(resources / "config");
+  REQUIRE(holder::cli::default_daemon_working_dir(resources / "bin" / "holderd") == resources);
+}
+
+TEST_CASE("a Windows install starts the daemon in the install directory", "[ensure][workdir]") {
+  // <install>\bin\holderd.exe, with schema\, config\ and assets\ in <install>.
+  const auto install = holder::test::make_temp_dir() / "Programs" / "Holder";
+  make_dirs(install / "bin");
+  make_dirs(install / "schema");
+  make_dirs(install / "config");
+  make_dirs(install / "assets");
+  REQUIRE(holder::cli::default_daemon_working_dir(install / "bin" / "holderd.exe") == install);
+}
+
+TEST_CASE("a bin directory without the daemon's data stays where it is", "[ensure][workdir]") {
+  const auto root = holder::test::make_temp_dir();
+  make_dirs(root / "bin");
+  REQUIRE(holder::cli::default_daemon_working_dir(root / "bin" / "holderd") == root / "bin");
+
+  // Only one of the two data directories is not enough.
+  make_dirs(root / "schema");
+  REQUIRE(holder::cli::default_daemon_working_dir(root / "bin" / "holderd") == root / "bin");
+}
+
+TEST_CASE("a development tree keeps starting the daemon in build/", "[ensure][workdir]") {
+  // daemon/ has schema/ and config/ one level above build/, as an install has above bin/.
+  const auto root = holder::test::make_temp_dir();
+  make_dirs(root / "daemon" / "build");
+  make_dirs(root / "daemon" / "schema");
+  make_dirs(root / "daemon" / "config");
+  REQUIRE(
+      holder::cli::default_daemon_working_dir(root / "daemon" / "build" / "holderd") ==
+      root / "daemon" / "build"
+  );
+}
+
 TEST_CASE("ensure parses dotted API versions", "[ensure]") {
   REQUIRE(parse_api_version("0.1") == std::optional<std::vector<unsigned long>>({0, 1}));
   REQUIRE(parse_api_version("1") == std::optional<std::vector<unsigned long>>({1}));

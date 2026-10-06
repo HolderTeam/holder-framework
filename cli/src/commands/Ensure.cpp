@@ -204,15 +204,6 @@ std::filesystem::path locate_daemon(const EnsureOptions& options) {
   return found.empty() ? found : absolute_path(found);
 }
 
-// Installed layouts keep the daemon's data (schema, config, docs) in ../share/holder-daemon.
-// Elsewhere the daemon looks in its working directory, so start it beside its binary.
-std::filesystem::path default_working_dir(const std::filesystem::path& daemon) {
-  std::error_code ec;
-  const auto installed = daemon.parent_path().parent_path() / "share" / "holder-daemon";
-  if (std::filesystem::is_directory(installed, ec)) return installed;
-  return daemon.parent_path();
-}
-
 std::string describe_seconds(std::chrono::milliseconds value) {
   const double seconds = static_cast<double>(value.count()) / 1000.0;
   std::string text = std::to_string(seconds);
@@ -401,6 +392,24 @@ EnsureOptions parse_ensure_options(int argc, char* argv[]) {
   return options;
 }
 
+std::filesystem::path default_daemon_working_dir(const std::filesystem::path& daemon) {
+  std::error_code ec;
+  // Installed layouts keep the daemon's data in ../share/holder-daemon.
+  const auto root = daemon.parent_path().parent_path();
+  const auto installed = root / "share" / "holder-daemon";
+  if (std::filesystem::is_directory(installed, ec)) return installed;
+  // The macOS app bundle (Contents/Resources/bin/holderd) and the Windows install
+  // (<install>\bin\holderd.exe) keep the data in the directory above bin/. Only a directory
+  // named bin counts: a development tree also has schema/ and config/ above build/.
+  if (daemon.parent_path().filename() == "bin" &&
+      std::filesystem::is_directory(root / "schema", ec) &&
+      std::filesystem::is_directory(root / "config", ec)) {
+    return root;
+  }
+  // Elsewhere the daemon looks in its working directory, so start it beside its binary.
+  return daemon.parent_path();
+}
+
 EnsureResult ensure_daemon(const holder::core::Paths& paths, const EnsureOptions& options) {
   const auto started_at = Clock::now();
   const auto elapsed_ms = [&]() {
@@ -481,7 +490,7 @@ EnsureResult ensure_daemon(const holder::core::Paths& paths, const EnsureOptions
       request.args.push_back(std::to_string(*options.idle_exit_seconds));
       result.idle_exit_seconds = *options.idle_exit_seconds;
     }
-    request.working_dir = options.working_dir.empty() ? default_working_dir(daemon)
+    request.working_dir = options.working_dir.empty() ? default_daemon_working_dir(daemon)
                                                       : options.working_dir;
     request.log_path = log_path;
     result.log_path = log_path.string();
