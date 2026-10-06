@@ -638,3 +638,20 @@ if(BUILD_TESTING)
   enable_testing()
   add_subdirectory(tests)
 endif()
+
+# GCC 13 reports a false -Wstringop-overflow in fmt 9's bigint buffer growth.
+# Limit the workaround to the affected source and dependency/compiler versions.
+# https://github.com/fmtlib/fmt/issues/3533
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 13
+   AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 14
+   AND fmt_VERSION VERSION_GREATER_EQUAL 9
+   AND fmt_VERSION VERSION_LESS 10)
+  set(HOLDER_FMT_WARNING_TARGETS holderd)
+  if(TARGET holder_daemon_tests)
+    list(APPEND HOLDER_FMT_WARNING_TARGETS holder_daemon_tests)
+  endif()
+  set_property(SOURCE src/api/routes/ai/runs/AiRunPostRoute.cpp
+    TARGET_DIRECTORY ${HOLDER_FMT_WARNING_TARGETS}
+    APPEND PROPERTY COMPILE_OPTIONS -Wno-stringop-overflow)
+endif()
