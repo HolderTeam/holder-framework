@@ -376,6 +376,16 @@ jobs:
           $installDir = (New-Item -ItemType Directory -Force "out\installer-smoke\Holder-unsigned").FullName
           $logPath = Join-Path (Resolve-Path "out\installer-smoke").Path "unsigned-install.log"
 
+          # Leave the user PATH the way an older installer and an ordinary user do: an entry that needs
+          # expanding, and the old installer's bin directory (the runtime's DLLs), which must go.
+          $environmentKey = "HKCU:\Environment"
+          $originalPath = (Get-Item $environmentKey).GetValue("Path", "", "DoNotExpandEnvironmentNames")
+          $originalKind = try { (Get-Item $environmentKey).GetValueKind("Path").ToString() } catch { "ExpandString" }
+          $seedEntry = "%USERPROFILE%\holder-smoke-seed"
+          $seed = "$seedEntry;" + (Join-Path $installDir "bin")
+          $seeded = if ($originalPath) { "$originalPath;$seed" } else { $seed }
+          New-ItemProperty -Path $environmentKey -Name Path -PropertyType ExpandString -Value $seeded -Force | Out-Null
+
           $process = Start-Process `
             -FilePath $env:UNSIGNED_SETUP_EXE `
             -ArgumentList @(
@@ -411,6 +421,37 @@ jobs:
           & (Join-Path $installDir "bin\holderd.exe") --version
           & (Join-Path $installDir "bin\holderctl.exe") --help
 
+          # The command-line tools: launchers that work, and the only thing the installer puts on PATH.
+          foreach ($launcher in @("holderctl", "holderd")) {
+            if (!(Test-Path (Join-Path $installDir "cli\$launcher.cmd"))) {
+              throw "Missing command-line launcher: cli\$launcher.cmd"
+            }
+          }
+          $ctlHelp = & (Join-Path $installDir "cli\holderctl.cmd") --help 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0 -or $ctlHelp -notmatch "Usage") {
+            throw "cli\holderctl.cmd did not run holderctl (exit $LASTEXITCODE): $ctlHelp"
+          }
+          $daemonVersion = & (Join-Path $installDir "cli\holderd.cmd") --version 2>&1 | Out-String
+          if ($LASTEXITCODE -ne 0) {
+            throw "cli\holderd.cmd did not run holderd (exit $LASTEXITCODE): $daemonVersion"
+          }
+
+          $key = Get-Item $environmentKey
+          $rawPath = $key.GetValue("Path", "", "DoNotExpandEnvironmentNames")
+          $installedEntries = @($rawPath -split ";" | Where-Object { $_ })
+          if ($installedEntries -notcontains (Join-Path $installDir "cli")) {
+            throw "The cli directory is not on the user PATH by default"
+          }
+          if ($installedEntries -contains (Join-Path $installDir "bin")) {
+            throw "The bin directory (the runtime's DLLs) must not be on the user PATH"
+          }
+          if ($installedEntries -notcontains $seedEntry) {
+            throw "The installer lost or expanded an existing PATH entry: $rawPath"
+          }
+          if ($key.GetValueKind("Path").ToString() -ne "ExpandString") {
+            throw "The installer changed the user PATH to a value type that does not expand variables"
+          }
+
           $uninstaller = Join-Path $installDir "unins000.exe"
           if (Test-Path $uninstaller) {
             Start-Process `
@@ -418,6 +459,26 @@ jobs:
               -ArgumentList @("/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART") `
               -Wait
           }
+
+          # The uninstaller re-launches itself from a temporary copy, so wait for it to finish.
+          for ($i = 0; $i -lt 60 -and (Test-Path (Join-Path $installDir "cli")); $i++) {
+            Start-Sleep -Milliseconds 500
+          }
+          if (Test-Path (Join-Path $installDir "cli")) {
+            throw "The uninstaller left the cli directory behind"
+          }
+          $afterEntries = @((Get-Item $environmentKey).GetValue("Path", "", "DoNotExpandEnvironmentNames") -split ";" | Where-Object { $_ })
+          foreach ($leftover in @((Join-Path $installDir "cli"), (Join-Path $installDir "bin"))) {
+            if ($afterEntries -contains $leftover) {
+              throw "The uninstaller left $leftover on the user PATH"
+            }
+          }
+          if ($afterEntries -notcontains $seedEntry) {
+            throw "The uninstaller removed an entry that was not Holder's"
+          }
+
+          # Put the user PATH back as it was.
+          New-ItemProperty -Path $environmentKey -Name Path -PropertyType $originalKind -Value $originalPath -Force | Out-Null
 
       - name: Build self-signed tester package
         if: inputs.sign_test_installer
