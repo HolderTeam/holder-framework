@@ -111,7 +111,7 @@ jobs:
 
           tr -d '[:space:]' < ../VERSION \
             > "${stage_dir}/release/holder-daemon-version.txt"
-          tr -d '[:space:]' < API_VERSION \
+          tr -d '[:space:]' < ../api/API_VERSION \
             > "${stage_dir}/release/holder-daemon-api-version.txt"
           printf '%s\n' "$(git rev-parse HEAD)" \
             > "${stage_dir}/release/holder-daemon-commit.txt"
@@ -154,7 +154,7 @@ jobs:
           test "$("${stage_dir}/usr/bin/holderd" --version)" = \
             "holderd ${expected_version}"
           test "$(cat "${stage_dir}/release/holder-daemon-api-version.txt")" = \
-            "$(tr -d '[:space:]' < API_VERSION)"
+            "$(tr -d '[:space:]' < ../api/API_VERSION)"
           "${stage_dir}/usr/bin/holderctl" --help
 
           runtime_dir="$(mktemp -d)"
@@ -222,7 +222,7 @@ jobs:
           export HOLDER_TEST_KEYSTORE_DIR="${runtime_dir}/keystore"
 
           ctl="${stage_dir}/usr/bin/holderctl"
-          api_version="$(tr -d '[:space:]' < API_VERSION)"
+          api_version="$(tr -d '[:space:]' < ../api/API_VERSION)"
           field() {
             python3 -c 'import json, sys; print(json.load(sys.stdin)'"$1"')'
           }

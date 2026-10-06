@@ -70,13 +70,15 @@ jobs:
 
           gpgconf --kill gpg-agent
 
-      - name: Copy the holderctl and shared sources into daemon/
+      - name: Copy the contract, holderctl and shared sources into daemon/
         working-directory: daemon
         run: |
-          # The source package is built from daemon/ alone, so it carries copies of the holderctl
-          # sources (cli/) and the platform files holderd and holderctl share (common/); the CMake
-          # build uses these when the directories beside daemon/ are out of reach.
-          rm -rf cli common
+          # The source package is built from daemon/ alone, so it carries copies of the HTTP
+          # contract (api/), the holderctl sources (cli/) and the platform files holderd and
+          # holderctl share (common/); the CMake build uses these when the directories beside
+          # daemon/ are out of reach.
+          rm -rf api cli common
+          cp -a ../api ./api
           cp -a ../cli ./cli
           cp -a ../common ./common
 

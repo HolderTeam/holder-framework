@@ -100,7 +100,7 @@ jobs:
           New-Item -ItemType Directory -Force "$stageDir/release" | Out-Null
           git rev-parse HEAD | Set-Content -Encoding ascii "$stageDir/release/holder-daemon-commit.txt"
           (Get-Content ../VERSION -Raw).Trim() | Set-Content -Encoding ascii "$stageDir/release/holder-daemon-version.txt"
-          (Get-Content API_VERSION -Raw).Trim() | Set-Content -Encoding ascii "$stageDir/release/holder-daemon-api-version.txt"
+          (Get-Content ../api/API_VERSION -Raw).Trim() | Set-Content -Encoding ascii "$stageDir/release/holder-daemon-api-version.txt"
           Copy-Item "$env:HOLDER_CORE_SDK/share/vcpkg-licenses" -Destination $stageDir -Recurse
           $boostLicenses = Get-ChildItem "out/vcpkg-installed/x64-windows/share/boost*/copyright"
           foreach ($license in $boostLicenses) {
