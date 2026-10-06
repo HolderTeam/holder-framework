@@ -111,6 +111,10 @@ jobs:
     runs-on: ubuntu-24.04
     container: ${{ matrix.image }}
     timeout-minutes: 45
+    env:
+      # The package is built from daemon/ copied out on its own, as the Debian source package is,
+      # so a file the build reads from beside daemon/ shows up here instead of on Launchpad.
+      EXPORTED_DAEMON: /tmp/export/daemon
     steps:
       - name: Install packaging tools and configure package source
         env:
@@ -125,17 +129,22 @@ jobs:
           repository: HolderTeam/holder-framework
           ref: ${{ needs.resolve.outputs.daemon_commit }}
           persist-credentials: false
+      - name: Export daemon/ on its own, as the Debian source package sees it
+        run: |
+          mkdir -p "$(dirname "${EXPORTED_DAEMON}")"
+          cp -a daemon "${EXPORTED_DAEMON}"
+          daemon/packaging/linux/prepare-source-tree.sh "${GITHUB_WORKSPACE}" "${EXPORTED_DAEMON}"
       - name: Build daemon with distribution core packages
         env:
           DEBIAN_FRONTEND: noninteractive
-        working-directory: daemon
+        working-directory: ${{ env.EXPORTED_DAEMON }}
         run: |
           cp -a packaging/linux/debian debian
           mk-build-deps --install --remove --tool 'apt-get -y --no-install-recommends' debian/control
           dpkg-buildpackage -b -us -uc -j2
       - name: Verify shared core linkage and package dependency
         shell: bash
-        working-directory: daemon
+        working-directory: ${{ env.EXPORTED_DAEMON }}
         run: |
           ldd build/holderd | grep 'libholder.so.0'
           ldd build/holderctl | grep 'libholder.so.0'
@@ -150,5 +159,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: holder-daemon-${{ matrix.series }}-packages
-          path: daemon/out/ubuntu-packages/*.deb
+          path: ${{ env.EXPORTED_DAEMON }}/out/ubuntu-packages/*.deb
           if-no-files-found: error
