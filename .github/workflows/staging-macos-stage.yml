@@ -164,6 +164,35 @@ jobs:
             md4c \
             openssl@3
 
+      - name: Build GTK with macOS accessibility
+        run: |
+          set -euo pipefail
+          brew install meson ninja pkgconf rust
+          bash sources/holder-framework/staging/scripts/build-macos-accessible-gtk.sh \
+            "${RUNNER_TEMP}/holder-accessible-gtk"
+
+          # Replace runtime libraries only in this disposable runner's GTK keg.
+          # Keeping the original GTK install paths lets the existing recursive
+          # bundler pick up this build for the desktop and its GTK consumers.
+          runtime_prefix="${RUNNER_TEMP}/holder-accessible-gtk/runtime"
+          gtk_lib_dir="$(brew --prefix gtk4)/lib"
+          chmod u+w "${gtk_lib_dir}/libgtk-4.1.dylib"
+          cp -a "${runtime_prefix}/lib/"*.dylib "${gtk_lib_dir}/"
+          for library in "${gtk_lib_dir}/"libaccesskit*.dylib "${gtk_lib_dir}/libgtk-4.1.dylib"; do
+            [ ! -L "${library}" ] || continue
+            chmod u+w "${library}"
+            install_name_tool -id "${gtk_lib_dir}/$(basename "${library}")" "${library}"
+            while IFS= read -r dependency; do
+              case "${dependency}" in
+                "${runtime_prefix}/lib/"*)
+                  install_name_tool -change "${dependency}" \
+                    "${gtk_lib_dir}/$(basename "${dependency}")" "${library}"
+                  ;;
+              esac
+            done < <(otool -L "${library}" | tail -n +2 | awk '{print $1}')
+            codesign --force --sign - "${library}"
+          done
+
       - name: Assemble Holder.app
         env:
           PRODUCT_VERSION: ${{ steps.pins.outputs.appimage_version }}
@@ -192,6 +221,11 @@ jobs:
             "${resources_dir}/lib" \
             "${resources_dir}/share" \
             "${metadata_dir}/packaging/macos"
+
+          cp -a "${RUNNER_TEMP}/holder-accessible-gtk/runtime/share/licenses" \
+            "${resources_dir}/share/licenses"
+          cp "${RUNNER_TEMP}/holder-accessible-gtk/runtime/gtk-accessibility-build.json" \
+            "${metadata_dir}/gtk-accessibility-build.json"
 
           sed "s/@HOLDER_VERSION@/${version}/g" \
             "${desktop_source_dir}/packaging/macos/Info.plist.in" \
@@ -596,6 +630,10 @@ jobs:
           app_dir="out/artifacts/Holder.app"
           resources_dir="${app_dir}/Contents/Resources"
           homebrew_prefix="$(brew --prefix)"
+
+          # Accessibility must survive dependency collection and path rewriting.
+          otool -L "${resources_dir}/lib/libgtk-4.1.dylib" | grep -F 'libaccesskit-c-0.18'
+          find "${resources_dir}/lib" -name 'libaccesskit-c-0.18*.dylib' -print -quit | grep .
 
           check_file() {
             local path="$1"
