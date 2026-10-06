@@ -319,7 +319,7 @@ jobs:
           )
 
       - name: Upload backend artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: holder-daemon-linux-x86_64${{ inputs.build_type == 'Release' && '-release' || '' }}
           path: daemon/out/artifacts/linux-backend-upload/*
