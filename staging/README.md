@@ -136,26 +136,11 @@ provenance is retained in `Holder.app/Contents/Resources/core-build.json`,
 `release/holder-core-provenance.json` and the release-candidate metadata.
 Explicit core and component run overrides support reproducible staging.
 
-The staged GTK runtime is rebuilt from the checksum-verified source for the
-installed Homebrew GTK version, with `-Daccesskit=enabled`. Homebrew's GTK bottle
-does not currently include this macOS accessibility bridge. Staging builds the
-compatible AccessKit C 0.18.0 release in an isolated directory, then replaces
-the runtime dylibs in the disposable runner's GTK keg before normal bundling.
-The final bundle must retain GTK's AccessKit dependency. Source versions and
-checksums are recorded in `release/gtk-accessibility-build.json`, and AccessKit
-licences are included in `share/licenses/accesskit-c` under `Contents/Resources`.
-An incompatible future GTK API fails the build instead of dropping accessibility.
-
-For local build validation, install `meson`, `ninja`, `pkgconf` and `rust`, then
-run `bash staging/scripts/build-macos-accessible-gtk.sh /tmp/holder-accessible-gtk`
-with a fresh output directory. This produces isolated runtime dylibs and does
-not replace local Homebrew libraries. The installed GTK must match Homebrew's
-current source version.
-
-Check a staged app with VoiceOver before release: navigate toolbar controls and
-the project/card lists, edit text, and open and close a preferences dialog.
-Verify names, roles, states and focus transitions. A linked accessibility backend
-is necessary but does not establish that every Holder interaction is accessible.
+Homebrew's GTK is built without the macOS accessibility bridge (AccessKit), so staging rebuilds the
+`libgtk-4` library from Homebrew's source version with `-Daccesskit=enabled`, using checksum-pinned
+AccessKit C 0.18.0, before bundling (`staging/scripts/build-macos-accessible-gtk.sh`). Staging fails if the
+final bundle's GTK no longer depends on AccessKit, and records the versions in `gtk-accessibility-build.json`.
+Before a release, try a staged app with VoiceOver: a linked bridge does not mean every Holder interaction is accessible.
 
 How to manually test a prerelease development version of Holder, aka a "staged copy".
 
