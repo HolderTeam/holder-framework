@@ -13,11 +13,6 @@ on:
         required: false
         default: ""
         type: string
-      launcher_run_id:
-        description: GitHub Actions run ID that uploaded holder-launcher-macos. Leave blank for latest successful main run.
-        required: false
-        default: ""
-        type: string
       desktop_repository:
         description: Repository containing the desktop artifact and packaging metadata
         required: true
@@ -43,11 +38,6 @@ on:
         required: false
         default: latest-green
         type: string
-      launcher_repository:
-        description: Repository containing the launcher artifact
-        required: true
-        type: string
-        default: HolderTeam/holder-framework
 
 permissions:
   actions: read
@@ -75,10 +65,8 @@ jobs:
           CORE_REF_INPUT: ${{ inputs.core_ref }}
           DESKTOP_RUN_ID_INPUT: ${{ inputs.desktop_run_id }}
           BACKEND_RUN_ID_INPUT: ${{ inputs.backend_run_id }}
-          LAUNCHER_RUN_ID_INPUT: ${{ inputs.launcher_run_id }}
           DESKTOP_REPOSITORY_INPUT: ${{ inputs.desktop_repository }}
           BACKEND_REPOSITORY_INPUT: ${{ inputs.backend_repository }}
-          LAUNCHER_REPOSITORY_INPUT: ${{ inputs.launcher_repository }}
         run: |
           options=()
           if [[ -n "$RELEASE_MANIFEST" ]]; then
@@ -101,11 +89,9 @@ jobs:
           GH_TOKEN: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
           DESKTOP_RUN_ID_INPUT: ${{ steps.pins.outputs.desktop_run_id }}
           BACKEND_RUN_ID_INPUT: ${{ steps.pins.outputs.backend_run_id }}
-          LAUNCHER_RUN_ID_INPUT: ${{ steps.pins.outputs.launcher_run_id }}
           DESKTOP_REPOSITORY: ${{ steps.pins.outputs.desktop_repository }}
           DESKTOP_REF: ${{ inputs.desktop_ref }}
           BACKEND_REPOSITORY: ${{ steps.pins.outputs.backend_repository }}
-          LAUNCHER_REPOSITORY: ${{ steps.pins.outputs.launcher_repository }}
         run: python3 sources/holder-framework/staging/scripts/resolve-component-runs.py --platform macos --build-type "${{ steps.pins.outputs.build_type }}"
 
       - name: Check out holder-desktop metadata
@@ -134,21 +120,11 @@ jobs:
           repository: ${{ steps.pins.outputs.backend_repository }}
           run-id: ${{ steps.artifact_runs.outputs.backend_run_id }}
 
-      - name: Download launcher artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: holder-launcher-macos${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}
-          path: downloads/launcher
-          github-token: ${{ secrets.HOLDER_CI_ARTIFACT_TOKEN || github.token }}
-          repository: ${{ steps.pins.outputs.launcher_repository }}
-          run-id: ${{ steps.artifact_runs.outputs.launcher_run_id }}
-
       - name: Verify backend core and release pins
         shell: bash
         env:
           RELEASE_MANIFEST: ${{ inputs.release_manifest }}
           DESKTOP_COMMIT: ${{ steps.artifact_runs.outputs.desktop_commit }}
-          LAUNCHER_COMMIT: ${{ steps.artifact_runs.outputs.launcher_commit }}
           BUILD_TYPE: ${{ steps.pins.outputs.build_type }}
         run: |
           options=()
@@ -158,8 +134,7 @@ jobs:
           python3 sources/holder-framework/staging/scripts/core-provenance.py verify \
             --selection out/core-selection.json --platform macos \
             --backend-root downloads/backend --desktop-root downloads/desktop \
-            --launcher-root downloads/launcher --desktop-commit "$DESKTOP_COMMIT" \
-            --launcher-commit "$LAUNCHER_COMMIT" --build-type "$BUILD_TYPE" \
+            --desktop-commit "$DESKTOP_COMMIT" --build-type "$BUILD_TYPE" \
             --output out/core-provenance.json "${options[@]}"
 
       - name: Install Homebrew runtime tools
@@ -240,13 +215,13 @@ jobs:
           cp "${icon_source}" "${iconset_dir}/icon_512x512@2x.png"
           iconutil -c icns -o "${resources_dir}/Holder.icns" "${iconset_dir}"
 
-          cp downloads/launcher/Holder "${contents_dir}/MacOS/Holder"
-          cp downloads/desktop/bin/holder-desktop "${resources_dir}/bin/holder-desktop"
+          # The desktop is the bundle's main executable: it starts its own backend (holderctl ensure)
+          # and sets up the GTK runtime from inside the bundle, so no launcher is needed.
+          cp downloads/desktop/bin/holder-desktop "${contents_dir}/MacOS/Holder"
           cp downloads/backend/bin/holderd "${resources_dir}/bin/holderd"
           cp downloads/backend/bin/holderctl "${resources_dir}/bin/holderctl"
           chmod +x \
             "${contents_dir}/MacOS/Holder" \
-            "${resources_dir}/bin/holder-desktop" \
             "${resources_dir}/bin/holderd" \
             "${resources_dir}/bin/holderctl"
 
@@ -260,7 +235,6 @@ jobs:
           if [[ -f downloads/desktop/release/holder-desktop-build.json ]]; then
             cp downloads/desktop/release/holder-desktop-build.json "${metadata_dir}/"
           fi
-          cp downloads/launcher/build-info.json "${metadata_dir}/holder-launcher-build.json"
           if [[ -n "$RELEASE_MANIFEST" ]]; then
             cp "sources/holder-framework/staging/$RELEASE_MANIFEST" "${metadata_dir}/holder-framework-release.json"
           fi
@@ -323,7 +297,6 @@ jobs:
           }
 
           bundle_binary "${contents_dir}/MacOS/Holder" "@executable_path/../Resources/lib" "-od"
-          bundle_binary "${resources_dir}/bin/holder-desktop" "@executable_path/../lib" "-of"
           bundle_binary "${resources_dir}/bin/holderd" "@executable_path/../lib" "-of"
           bundle_binary "${resources_dir}/bin/holderctl" "@executable_path/../lib" "-of"
 
@@ -545,7 +518,6 @@ jobs:
           {
             find downloads/desktop -type f -print0
             find downloads/backend -type f -print0
-            find downloads/launcher -type f -print0
           } | sort -z | xargs -0 shasum -a 256 > "${artifact_hashes_path}"
 
           HOLDER_VERSION="${version}" \
@@ -556,8 +528,6 @@ jobs:
           DESKTOP_RUN_ID="${{ steps.artifact_runs.outputs.desktop_run_id }}" \
           BACKEND_REPOSITORY="${{ steps.pins.outputs.backend_repository }}" \
           BACKEND_RUN_ID="${{ steps.artifact_runs.outputs.backend_run_id }}" \
-          LAUNCHER_REPOSITORY="${{ steps.pins.outputs.launcher_repository }}" \
-          LAUNCHER_RUN_ID="${{ steps.artifact_runs.outputs.launcher_run_id }}" \
           METADATA_PATH="${metadata_dir}/release-candidate.json" \
           python3 - <<'PY'
           import json
@@ -566,7 +536,6 @@ jobs:
 
           metadata = {
               "core": json.load(open("out/core-provenance.json")),
-              "launcher_commit": "${{ steps.artifact_runs.outputs.launcher_commit }}",
               "backend_run_commit": "${{ steps.artifact_runs.outputs.backend_commit }}",
               "platform": "macos",
               "version": os.environ["HOLDER_VERSION"],
@@ -581,9 +550,6 @@ jobs:
               "backend_repository": os.environ["BACKEND_REPOSITORY"],
               "backend_run_id": os.environ["BACKEND_RUN_ID"],
               "backend_artifact": "holder-daemon-macos-backend${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}",
-              "launcher_repository": os.environ["LAUNCHER_REPOSITORY"],
-              "launcher_run_id": os.environ["LAUNCHER_RUN_ID"],
-              "launcher_artifact": "holder-launcher-macos${{ steps.pins.outputs.build_type == 'Release' && '-release' || '' }}",
           }
 
           with open(os.environ["METADATA_PATH"], "w", encoding="utf-8") as f:
@@ -615,7 +581,6 @@ jobs:
           fi
 
           codesign --force --sign - "${contents_dir}/MacOS/Holder"
-          codesign --force --sign - "${resources_dir}/bin/holder-desktop"
           codesign --force --sign - "${resources_dir}/bin/holderd"
           codesign --force --sign - "${resources_dir}/bin/holderctl"
           codesign --force --sign - "${app_dir}"
@@ -660,7 +625,6 @@ jobs:
           check_file "${app_dir}/Contents/Info.plist"
           check_file "${resources_dir}/Holder.icns"
           check_executable "${app_dir}/Contents/MacOS/Holder"
-          check_executable "${resources_dir}/bin/holder-desktop"
           check_executable "${resources_dir}/bin/holderd"
           check_executable "${resources_dir}/bin/holderctl"
           check_file "${resources_dir}/schema/schema.sql"
@@ -714,7 +678,6 @@ jobs:
 
           for binary in \
             "${app_dir}/Contents/MacOS/Holder" \
-            "${resources_dir}/bin/holder-desktop" \
             "${resources_dir}/bin/holderd" \
             "${resources_dir}/bin/holderctl"; do
             if otool -L "${binary}" | grep -F "${homebrew_prefix}/"; then
@@ -759,7 +722,6 @@ jobs:
 
           for binary in \
             "${app_dir}/Contents/MacOS/Holder" \
-            "${resources_dir}/bin/holder-desktop" \
             "${resources_dir}/bin/holderd" \
             "${resources_dir}/bin/holderctl"; do
             codesign --verify --strict --verbose=2 "${binary}"

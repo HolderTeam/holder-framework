@@ -1,3 +1,0 @@
-#pragma once
-#define HOLDER_BUILD_SOURCE "@BUILD_SOURCE@"
-#define HOLDER_BUILD_SOURCE_W L"@BUILD_SOURCE@"

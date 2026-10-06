@@ -33,7 +33,8 @@ def load_pin(path, platform="linux"):
     require(isinstance(pin["appimage_version"], str) and
             re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.+-]+)?", pin["appimage_version"]),
             "Invalid pinned AppImage version")
-    for name in (("desktop", "backend") if platform == "linux" else ("desktop", "backend", "launcher")):
+    # A manifest written when Windows and macOS still had a launcher may name one; it is ignored.
+    for name in ("desktop", "backend"):
         component = pin[name]
         commit(component["commit"])
         require(re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", component["repository"]),
@@ -42,7 +43,7 @@ def load_pin(path, platform="linux"):
     return pin
 
 
-def verify(selection, core, desktop_commit, backend_commit, pin=None, platform="linux", architecture="x86_64", launcher_commit=None, expected_build_type=None):
+def verify(selection, core, desktop_commit, backend_commit, pin=None, platform="linux", architecture="x86_64", expected_build_type=None):
     require(core["commit"] == selection["commit"],
             "Backend core revision differs from the selected SDK; choose a matching backend run")
     require(core["version"] == selection["version"], "Backend core version differs from selected SDK")
@@ -60,20 +61,14 @@ def verify(selection, core, desktop_commit, backend_commit, pin=None, platform="
                 core["build_type"] == pin["core"]["build_type"], "Backend does not match release core pin")
         require(desktop_commit == pin["desktop"]["commit"], "Desktop does not match release pin")
         require(backend_commit == pin["backend"]["commit"], "Backend does not match release pin")
-        if platform != "linux":
-            require(launcher_commit == pin["launcher"]["commit"], "Launcher does not match release pin")
     return {**core, "repository": selection["repository"],
             "release_tag": selection["release_tag"], "sdk_asset": assets[0],
             **({"daemon_commit": backend_commit} if backend_commit else {})}
 
 
-def verify_component_builds(pin, desktop, launcher=None):
+def verify_component_builds(pin, desktop):
     require(desktop["commit"] == pin["desktop"]["commit"], "Desktop build metadata differs from release pin")
     require(desktop["build_type"] == "release", "Production manifest requires a release desktop artifact")
-    if "launcher" in pin:
-        require(launcher["source"]["commit"] == pin["launcher"]["commit"],
-                "Launcher build metadata differs from release pin")
-        require(launcher["configuration"] == "Release", "Production manifest requires a Release launcher artifact")
 
 
 def main():
@@ -86,20 +81,16 @@ def main():
     parser.add_argument("--output")
     parser.add_argument("--core-manifest")
     parser.add_argument("--desktop-commit")
-    parser.add_argument("--launcher-commit")
-    parser.add_argument("--launcher-root")
     parser.add_argument("--build-type", choices=("RelWithDebInfo", "Release"))
     parser.add_argument("--platform", default="linux", choices=("linux", "windows", "macos"))
     args = parser.parse_args()
     pin = load_pin(args.release_manifest, args.platform) if args.release_manifest else None
     if args.command == "prepare":
-        components = ("desktop", "backend") if args.platform == "linux" else ("desktop", "backend", "launcher")
+        components = ("desktop", "backend")
         values = {name: os.environ.get(name.upper() + "_INPUT", "") for name in
                   ("desktop_run_id", "backend_run_id", "appimage_version")}
         values["core_ref"] = os.environ.get("CORE_REF_INPUT", "latest-green")
         values["build_type"] = "RelWithDebInfo"
-        if args.platform != "linux":
-            values["launcher_run_id"] = os.environ.get("LAUNCHER_RUN_ID_INPUT", "")
         for name in components:
             values[name + "_repository"] = os.environ[name.upper() + "_REPOSITORY_INPUT"]
         if pin:
@@ -132,12 +123,10 @@ def main():
         result = verify(json.loads(Path(args.selection).read_text()),
                         json.loads(core_path.read_text()), desktop_commit, backend_commit, pin,
                         args.platform, "arm64" if args.platform == "macos" else "x86_64",
-                        args.launcher_commit, args.build_type)
+                        args.build_type)
         if pin and pin["core"]["build_type"] == "Release":
             desktop_info = json.loads((Path(args.desktop_root) / "release/holder-desktop-build.json").read_text())
-            launcher_info = (json.loads((Path(args.launcher_root) / "build-info.json").read_text())
-                             if args.platform != "linux" else None)
-            verify_component_builds(pin, desktop_info, launcher_info)
+            verify_component_builds(pin, desktop_info)
         Path(args.output).write_text(json.dumps(result, indent=2) + "\n")
         print(f"Verified framework core SDK {result['commit']} ({result['build_type']})")
 

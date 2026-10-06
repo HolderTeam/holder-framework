@@ -1,6 +1,0 @@
-# Keep source and documentation consistent across Windows and macOS.
-* text=auto eol=lf
-
-# Native Windows command scripts use CRLF.
-*.bat text eol=crlf
-*.cmd text eol=crlf

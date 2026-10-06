@@ -104,11 +104,9 @@ class ProvenanceTests(unittest.TestCase):
     def test_shared_framework_manifest_selects_platform_and_one_core_pin(self):
         components = {
             "desktop": {"commit": "c" * 40, "repository": "HolderTeam/holder-desktop", "run_id": "123"},
-            "backend": {"commit": "d" * 40, "repository": "HolderTeam/holder-daemon", "run_id": "456"},
-            "launcher": {"commit": "f" * 40, "repository": "HolderTeam/holder-launcher", "run_id": "789"}}
+            "backend": {"commit": "d" * 40, "repository": "HolderTeam/holder-daemon", "run_id": "456"}}
         document = {"version": "0.2.1-rc.1", "core": {"commit": self.sha, "build_type": "Release"},
-                    "platforms": {"linux": {key: value for key, value in components.items() if key != "launcher"},
-                                  "windows": components, "macos": components}}
+                    "platforms": {"linux": components, "windows": components, "macos": components}}
         with tempfile.TemporaryDirectory() as directory:
             manifest = Path(directory) / "framework.json"
             manifest.write_text(json.dumps(document))
@@ -121,24 +119,55 @@ class ProvenanceTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "no macos selection"):
                 tool.load_pin(manifest, "macos")
 
-    def test_production_rejects_development_desktop_or_launcher(self):
-        pin = {**self.pin, "launcher": {"commit": "f" * 40}}
-        desktop = {"commit": "c" * 40, "build_type": "release"}
-        launcher = {"source": {"commit": "f" * 40}, "configuration": "Release"}
-        tool.verify_component_builds(pin, desktop, launcher)
-        with self.assertRaisesRegex(ValueError, "release desktop"):
-            tool.verify_component_builds(pin, {**desktop, "build_type": "debugoptimized"}, launcher)
-        with self.assertRaisesRegex(ValueError, "Release launcher"):
-            tool.verify_component_builds(pin, desktop, {**launcher, "configuration": "RelWithDebInfo"})
+    def test_a_manifest_written_when_there_was_a_launcher_is_still_accepted(self):
+        launcher = {"commit": "f" * 40, "repository": "HolderTeam/holder-launcher", "run_id": "789"}
+        components = {
+            "desktop": {"commit": "c" * 40, "repository": "HolderTeam/holder-desktop", "run_id": "123"},
+            "backend": {"commit": "d" * 40, "repository": "HolderTeam/holder-daemon", "run_id": "456"}}
+        document = {"version": "0.2.1-rc.1", "core": {"commit": self.sha, "build_type": "Release"},
+                    "platforms": {"windows": {**components, "launcher": launcher},
+                                  "macos": {**components, "launcher": launcher}}}
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "framework.json"
+            manifest.write_text(json.dumps(document))
+            for platform in ("windows", "macos"):
+                pin = tool.load_pin(manifest, platform)
+                self.assertEqual(pin["desktop"]["run_id"], "123")
+                # The launcher is no longer a component; an old entry is ignored, not verified.
+                tool.verify_component_builds(pin, {"commit": "c" * 40, "build_type": "release"})
 
-    def test_launcher_source_pin_is_checked(self):
-        core = {**self.core, "platform": "windows"}
-        selection = copy.deepcopy(self.selection)
-        selection["assets"][0]["platform"] = "windows"
-        pin = {**self.pin, "launcher": {"commit": "f" * 40}}
-        with self.assertRaisesRegex(ValueError, "Launcher does not match"):
-            tool.verify(selection, core, "c" * 40, "d" * 40, pin,
-                        platform="windows", launcher_commit="e" * 40)
+    def test_a_missing_desktop_or_backend_is_still_rejected(self):
+        components = {
+            "desktop": {"commit": "c" * 40, "repository": "HolderTeam/holder-desktop", "run_id": "123"}}
+        document = {"version": "0.2.1-rc.1", "core": {"commit": self.sha, "build_type": "Release"},
+                    "platforms": {"windows": components}}
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "framework.json"
+            manifest.write_text(json.dumps(document))
+            with self.assertRaises(KeyError):
+                tool.load_pin(manifest, "windows")
+
+    def test_production_rejects_development_desktop(self):
+        desktop = {"commit": "c" * 40, "build_type": "release"}
+        tool.verify_component_builds(self.pin, desktop)
+        with self.assertRaisesRegex(ValueError, "release desktop"):
+            tool.verify_component_builds(self.pin, {**desktop, "build_type": "debugoptimized"})
+        with self.assertRaisesRegex(ValueError, "differs from release pin"):
+            tool.verify_component_builds(self.pin, {**desktop, "commit": "e" * 40})
+
+    def test_prepare_outputs_no_launcher_for_any_platform(self):
+        for platform in ("linux", "windows", "macos"):
+            with tempfile.TemporaryDirectory() as directory:
+                output = Path(directory) / "output.txt"
+                environment = {"GITHUB_OUTPUT": str(output), "DESKTOP_REPOSITORY_INPUT": "HolderTeam/holder-desktop",
+                               "BACKEND_REPOSITORY_INPUT": "HolderTeam/holder-core"}
+                with patch.dict(os.environ, environment, clear=False), \
+                        patch.object(sys, "argv", ["core-provenance.py", "prepare", "--platform", platform]):
+                    tool.main()
+                names = {line.split("=", 1)[0] for line in output.read_text().splitlines()}
+                self.assertIn("desktop_run_id", names)
+                self.assertIn("backend_run_id", names)
+                self.assertFalse(any("launcher" in name for name in names), platform)
 
 
 if __name__ == "__main__":
