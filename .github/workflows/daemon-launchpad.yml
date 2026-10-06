@@ -74,13 +74,9 @@ jobs:
         working-directory: daemon
         run: |
           # The source package is built from daemon/ alone, so it carries copies of the HTTP
-          # contract (api/), the holderctl sources (cli/) and the platform files holderd and
-          # holderctl share (common/); the CMake build uses these when the directories beside
-          # daemon/ are out of reach.
-          rm -rf api cli common
-          cp -a ../api ./api
-          cp -a ../cli ./cli
-          cp -a ../common ./common
+          # contract (api/), the holderctl sources (cli/), the platform files holderd and holderctl
+          # share (common/) and VERSION. The Daemon CI package build runs the same script.
+          packaging/linux/prepare-source-tree.sh "${GITHUB_WORKSPACE}" "${PWD}"
 
       - name: Prepare Debian directory
         env:
