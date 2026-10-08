@@ -3,8 +3,9 @@
 This repository contains the Python HTTP client for a running holder-daemon.
 holder-kit is a separate offline library; do not add native bindings here.
 
-The high-level API has not been designed. Keep this initial experiment confined
-to project tooling and the low-level generated client in `src/holder/generated`.
+Handwritten transport and high-level APIs may live alongside `src/holder/generated`.
+Keep entity and recovery policy in the daemon/core rather than duplicating it in
+the client. The incremental change-feed transport lives in `src/holder/events.py`.
 Do not hand-edit generated files. Use `python scripts/generate.py` to regenerate
 and `python scripts/generate.py --check` to verify them.
 

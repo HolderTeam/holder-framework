@@ -58,6 +58,7 @@ statuses. Transport errors propagate from HTTPX.
 ```text
 openapi/                 Verbatim contract snapshot, provenance and generator config
 src/holder/generated/    Generated transport, endpoint modules and models
+src/holder/events.py     Handwritten incremental asyncio change-feed transport
 scripts/generate.py      Regeneration and comparison against checked-in code
 tests/                   Mock HTTP transport and contract coverage checks
 ```
@@ -117,12 +118,72 @@ against the owning API, validates provenance, and compares regenerated output
 without writing. CI uses this command, so owning-contract changes require a tested
 snapshot refresh. Plain `--check` remains available for snapshot-only checkouts.
 
-**Real-time streaming is the main gap.** The four event-stream operations
-generate ordinary HTTP requests which buffer the entire body and return a
-string. They do not yield individual events, reconnect or handle cancellation;
-long-lived streams may hit the HTTPX timeout. Binary asset downloads are also
-buffered in memory, although the bytes and headers are preserved. Streaming
-would need a separately designed transport or handwritten implementation.
+## Incremental change events
+
+Use `holder.events.ChangeStream` for genuine incremental `GET /events` delivery.
+It uses HTTPX's [async streaming transport](https://www.python-httpx.org/async/)
+with the generated client's authentication, connection pool and transport settings.
+It targets asyncio; the generated REST API also remains available synchronously.
+
+```python
+from holder.events import ChangeStream
+from holder.generated import AuthenticatedClient
+from holder.generated.api.default import get_event_cursor
+from holder.generated.models import EventCheckpointResponse
+
+async def watch(base_url, token, project_id):
+    async with AuthenticatedClient(base_url=base_url, token=token) as client:
+        checkpoint = await get_event_cursor.asyncio(
+            client=client, project_id=project_id,
+        )
+        if not isinstance(checkpoint, EventCheckpointResponse):
+            raise RuntimeError("Could not fetch event checkpoint")
+        # Read the current entities here, after fetching the checkpoint.
+        async with ChangeStream(
+            client,
+            project_id=project_id,
+            last_event_id=checkpoint.data.cursor,
+        ) as events:
+            async for event in events:
+                if event.event == "resync_required":
+                    print("Refresh required:", event.json())
+                    break
+                print(event.id, event.event, event.json())
+                # Finish processing this invalidation before requesting the next.
+```
+
+Frames yield as soon as their terminating blank line arrives. Heartbeat comments
+and incomplete frames are ignored; UTF-8, split network chunks, CR/LF and multiline
+data are supported. `Event.data` preserves text; `Event.json()` parses it on demand.
+Opaque IDs are never interpreted. The iterator retains the previous processed
+ID in `events.cursor` and advances it when iteration resumes after handling an
+event. An exception, cancellation or break before resuming leaves that event
+unacknowledged, so it can replay on a later subscription. Persist `events.cursor`
+for restart; duplicate invalidations are possible and should be idempotent.
+The `ready` frame's ID preserves replay position; its JSON checkpoint can be newer
+and is never used to skip replay.
+
+EOF and HTTPX transport failures reconnect from the cursor with the same
+`project_id` and `last_revision`. Reconnects wait `reconnect_delay` seconds (default
+1). This continues until cancelled or closed. Read timeouts default to disabled
+for idle subscriptions; connect, write and pool timeouts default to 10 seconds.
+Pass an `httpx.Timeout` to configure all four for this stream. HTTP error statuses
+raise `httpx.HTTPStatusError`; invalid content types raise `ValueError`. Neither
+is retried automatically. `resync_required` closes the response, yields the event
+once and ends iteration without advancing the cursor. Refresh state using the
+checkpoint/snapshot procedure before starting a new subscription.
+
+Always use `async with`. Context exit closes the response on break, consumer
+errors and task cancellation. Cancelling a task blocked in `anext(events)` or
+calling `await events.aclose()` interrupts a pending read or reconnect delay.
+Cleanup completes even if cancellation repeats while closing the response.
+Only one reader may iterate a stream at a time. The supplied client remains
+caller-owned; close its context to release its connection pool. Disconnecting
+does not send `/bye` or cancel daemon jobs.
+
+Generated event-stream calls still buffer entire bodies. The handwritten iterator
+currently covers the change feed; AI-run/pull SSE and binary downloads remain
+buffered through generated calls.
 
 Local tests cover every contract operation's generated method/path, module
 imports, bearer auth, query encoding, PATCH null/omission behavior, error
@@ -130,4 +191,8 @@ envelopes, checkpoint nulls/cursors, replay headers, documented stream errors,
 explicit bodyless goodbye, YAML, buffered events, binary downloads and an async
 public request. A tooling regression test rejects owning-contract drift without
 refreshing the snapshot.
-They use HTTPX's mock transport; live-daemon integration has not been tested.
+Streaming tests additionally use delayed loopback HTTP servers to verify
+incremental delivery, replay after disconnect, and peer-observed socket cleanup.
+Mock streams cover interrupted frames, heartbeat/UTF-8 framing, ready cursors,
+resync, HTTP errors, consumer failures and cancellation during reads, reconnect
+delays and response cleanup. Live-daemon integration has not been tested.

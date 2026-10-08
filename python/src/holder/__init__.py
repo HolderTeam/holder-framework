@@ -1,1 +1,1 @@
-"""Holder's experimental Python client; low-level API lives in holder.generated."""
+"""Holder Python Library - control your knowledge using Python."""
