@@ -1,6 +1,5 @@
 from http import HTTPStatus
 from typing import Any
-from urllib.parse import quote
 
 import httpx
 
@@ -11,19 +10,27 @@ from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
-    job_id: str,
     *,
+    project_id: str | Unset = UNSET,
+    last_revision: str | Unset = UNSET,
     last_event_id: str | Unset = UNSET,
 ) -> dict[str, Any]:
     headers: dict[str, Any] = {}
     if not isinstance(last_event_id, Unset):
         headers["Last-Event-ID"] = last_event_id
 
+    params: dict[str, Any] = {}
+
+    params["project_id"] = project_id
+
+    params["last_revision"] = last_revision
+
+    params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
+
     _kwargs: dict[str, Any] = {
         "method": "get",
-        "url": "/ai/runner/pull/{job_id}/events".format(
-            job_id=quote(str(job_id), safe=""),
-        ),
+        "url": "/events",
+        "params": params,
     }
 
     _kwargs["headers"] = headers
@@ -57,11 +64,6 @@ def _parse_response(
 
         return response_405
 
-    if response.status_code == 501:
-        response_501 = ErrorResponse.from_dict(response.json())
-
-        return response_501
-
     if response.status_code == 503:
         response_503 = ErrorResponse.from_dict(response.json())
 
@@ -85,19 +87,27 @@ def _build_response(
 
 
 def sync_detailed(
-    job_id: str,
     *,
     client: AuthenticatedClient | Client,
+    project_id: str | Unset = UNSET,
+    last_revision: str | Unset = UNSET,
     last_event_id: str | Unset = UNSET,
 ) -> Response[ErrorResponse | str]:
-    """Stream pull job progress (SSE)
+    """Subscribe to committed daemon state changes (SSE)
 
-     Streams progress snapshots on status changes; completed or failed closes the stream. Pull event IDs
-    are connection-local; reconnect without Last-Event-ID to fetch current progress after
-    resync_required. Disconnecting does not cancel the pull.
+     Sends ready, then project.changed, card.changed, resource.changed,
+    location.changed, thread.changed, message.changed and run.changed invalidations.
+    Intermediate states can coalesce. Each frame has an opaque id and JSON data.
+    Without a cursor starts at the current tail. Last-Event-ID replays bounded
+    in-memory history. Restart, an expired cursor or last_revision without a
+    replayable cursor returns resync_required with current Git revisions and
+    history URLs, then closes. This endpoint does not synthesize events from Git.
+    Refresh current state on resync; Git is the durable project history.
+    Comments provide heartbeats. Disconnecting unsubscribes without cancelling jobs.
 
     Args:
-        job_id (str):
+        project_id (str | Unset):
+        last_revision (str | Unset):
         last_event_id (str | Unset):
 
     Raises:
@@ -109,7 +119,8 @@ def sync_detailed(
     """
 
     kwargs = _get_kwargs(
-        job_id=job_id,
+        project_id=project_id,
+        last_revision=last_revision,
         last_event_id=last_event_id,
     )
 
@@ -121,19 +132,27 @@ def sync_detailed(
 
 
 def sync(
-    job_id: str,
     *,
     client: AuthenticatedClient | Client,
+    project_id: str | Unset = UNSET,
+    last_revision: str | Unset = UNSET,
     last_event_id: str | Unset = UNSET,
 ) -> ErrorResponse | str | None:
-    """Stream pull job progress (SSE)
+    """Subscribe to committed daemon state changes (SSE)
 
-     Streams progress snapshots on status changes; completed or failed closes the stream. Pull event IDs
-    are connection-local; reconnect without Last-Event-ID to fetch current progress after
-    resync_required. Disconnecting does not cancel the pull.
+     Sends ready, then project.changed, card.changed, resource.changed,
+    location.changed, thread.changed, message.changed and run.changed invalidations.
+    Intermediate states can coalesce. Each frame has an opaque id and JSON data.
+    Without a cursor starts at the current tail. Last-Event-ID replays bounded
+    in-memory history. Restart, an expired cursor or last_revision without a
+    replayable cursor returns resync_required with current Git revisions and
+    history URLs, then closes. This endpoint does not synthesize events from Git.
+    Refresh current state on resync; Git is the durable project history.
+    Comments provide heartbeats. Disconnecting unsubscribes without cancelling jobs.
 
     Args:
-        job_id (str):
+        project_id (str | Unset):
+        last_revision (str | Unset):
         last_event_id (str | Unset):
 
     Raises:
@@ -145,26 +164,35 @@ def sync(
     """
 
     return sync_detailed(
-        job_id=job_id,
         client=client,
+        project_id=project_id,
+        last_revision=last_revision,
         last_event_id=last_event_id,
     ).parsed
 
 
 async def asyncio_detailed(
-    job_id: str,
     *,
     client: AuthenticatedClient | Client,
+    project_id: str | Unset = UNSET,
+    last_revision: str | Unset = UNSET,
     last_event_id: str | Unset = UNSET,
 ) -> Response[ErrorResponse | str]:
-    """Stream pull job progress (SSE)
+    """Subscribe to committed daemon state changes (SSE)
 
-     Streams progress snapshots on status changes; completed or failed closes the stream. Pull event IDs
-    are connection-local; reconnect without Last-Event-ID to fetch current progress after
-    resync_required. Disconnecting does not cancel the pull.
+     Sends ready, then project.changed, card.changed, resource.changed,
+    location.changed, thread.changed, message.changed and run.changed invalidations.
+    Intermediate states can coalesce. Each frame has an opaque id and JSON data.
+    Without a cursor starts at the current tail. Last-Event-ID replays bounded
+    in-memory history. Restart, an expired cursor or last_revision without a
+    replayable cursor returns resync_required with current Git revisions and
+    history URLs, then closes. This endpoint does not synthesize events from Git.
+    Refresh current state on resync; Git is the durable project history.
+    Comments provide heartbeats. Disconnecting unsubscribes without cancelling jobs.
 
     Args:
-        job_id (str):
+        project_id (str | Unset):
+        last_revision (str | Unset):
         last_event_id (str | Unset):
 
     Raises:
@@ -176,7 +204,8 @@ async def asyncio_detailed(
     """
 
     kwargs = _get_kwargs(
-        job_id=job_id,
+        project_id=project_id,
+        last_revision=last_revision,
         last_event_id=last_event_id,
     )
 
@@ -186,19 +215,27 @@ async def asyncio_detailed(
 
 
 async def asyncio(
-    job_id: str,
     *,
     client: AuthenticatedClient | Client,
+    project_id: str | Unset = UNSET,
+    last_revision: str | Unset = UNSET,
     last_event_id: str | Unset = UNSET,
 ) -> ErrorResponse | str | None:
-    """Stream pull job progress (SSE)
+    """Subscribe to committed daemon state changes (SSE)
 
-     Streams progress snapshots on status changes; completed or failed closes the stream. Pull event IDs
-    are connection-local; reconnect without Last-Event-ID to fetch current progress after
-    resync_required. Disconnecting does not cancel the pull.
+     Sends ready, then project.changed, card.changed, resource.changed,
+    location.changed, thread.changed, message.changed and run.changed invalidations.
+    Intermediate states can coalesce. Each frame has an opaque id and JSON data.
+    Without a cursor starts at the current tail. Last-Event-ID replays bounded
+    in-memory history. Restart, an expired cursor or last_revision without a
+    replayable cursor returns resync_required with current Git revisions and
+    history URLs, then closes. This endpoint does not synthesize events from Git.
+    Refresh current state on resync; Git is the durable project history.
+    Comments provide heartbeats. Disconnecting unsubscribes without cancelling jobs.
 
     Args:
-        job_id (str):
+        project_id (str | Unset):
+        last_revision (str | Unset):
         last_event_id (str | Unset):
 
     Raises:
@@ -211,8 +248,9 @@ async def asyncio(
 
     return (
         await asyncio_detailed(
-            job_id=job_id,
             client=client,
+            project_id=project_id,
+            last_revision=last_revision,
             last_event_id=last_event_id,
         )
     ).parsed
