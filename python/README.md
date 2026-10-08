@@ -96,8 +96,15 @@ containers, not comprehensive runtime validators.
 The first generation exposed misplaced card PATCH and DELETE definitions in
 the daemon's OpenAPI contract. Those definitions were moved from the AI-message
 backlinks path to `/cards/{card_id}` in holder-daemon, with a regression test.
-The checked-in snapshot includes that correction from the daemon's separate
-`fix/openapi-card-mutation-paths` branch; provenance records its commit.
+The checked-in snapshot includes that correction; provenance records the
+historical daemon commit used for generation. The owning contract now lives at
+`holder-framework/api/openapi.yaml`.
+
+**Contract freshness:** as of 2026-10-08, the snapshot is behind the owning
+contract. It lacks `/events/cursor`, `/events`, `/bye` and newer SSE replay
+parameters/error responses. `generate.py --check` verifies output against the
+stored snapshot; it does not check that snapshot against `../api/openapi.yaml`.
+A contract refresh is pending.
 
 **Real-time streaming is the main gap.** The three event-stream operations
 generate ordinary HTTP requests which buffer the entire body and return a
