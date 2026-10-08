@@ -16,16 +16,26 @@ from ruamel.yaml import YAML
 from holder import generated
 from holder.generated import AuthenticatedClient, Client
 from holder.generated.api.default import (
+    get_ai_runner_pull_job_id_events,
     get_ai_runs_run_id_events,
     get_cards,
+    get_event_cursor,
     get_health,
     get_openapi_yaml,
     get_ping,
     get_resources_resource_id_assets_asset_id_content,
     patch_cards_card_id,
+    post_bye,
+    stream_changes,
 )
 from holder.generated.errors import UnexpectedStatus
-from holder.generated.models import CardUpdateRequest, ErrorResponse, HealthResponse
+from holder.generated.models import (
+    ByeResponse,
+    CardUpdateRequest,
+    ErrorResponse,
+    EventCheckpointResponse,
+    HealthResponse,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -72,6 +82,138 @@ def test_snapshot_matches_provenance():
 def test_all_generated_modules_import():
     for module in pkgutil.walk_packages(generated.__path__, generated.__name__ + "."):
         importlib.import_module(module.name)
+
+
+def test_event_checkpoint_preserves_opaque_cursor_and_nullable_revisions():
+    payload = {
+        "ok": True,
+        "data": {
+            "cursor": "process:opaque/7+tail",
+            "git_revisions": {"project & one": None, "other": "a" * 40},
+            "history_urls": {"project & one": "/projects/project/history"},
+        },
+    }
+
+    def respond(request):
+        assert request.method == "GET"
+        assert request.url.path == "/events/cursor"
+        assert request.url.params["project_id"] == "project & one"
+        assert request.headers["Authorization"] == "Bearer test-token"
+        return httpx.Response(200, json=payload)
+
+    with AuthenticatedClient(
+        base_url="http://holder.test",
+        token="test-token",
+        httpx_args={"transport": httpx.MockTransport(respond)},
+    ) as client:
+        result = get_event_cursor.sync(client=client, project_id="project & one")
+    assert isinstance(result, EventCheckpointResponse)
+    assert result.to_dict() == payload
+
+
+@pytest.mark.parametrize(
+    "endpoint,args,path,query",
+    [
+        (
+            stream_changes,
+            (),
+            "/events",
+            {"project_id": "project & one", "last_revision": "a" * 40},
+        ),
+        (get_ai_runs_run_id_events, ("run-1",), "/ai/runs/run-1/events", {}),
+        (
+            get_ai_runner_pull_job_id_events,
+            ("job-1",),
+            "/ai/runner/pull/job-1/events",
+            {},
+        ),
+    ],
+)
+@pytest.mark.parametrize("status", [200, 400, 405, 503])
+def test_replay_headers_queries_and_documented_stream_errors(
+    endpoint,
+    args,
+    path,
+    query,
+    status,
+):
+    payload = b'id: opaque:7\nevent: resync_required\ndata: {"reason":"history_unavailable"}\n\n'
+
+    def respond(request):
+        assert request.method == "GET"
+        assert request.url.path == path
+        assert dict(request.url.params) == query
+        assert request.headers["Last-Event-ID"] == "opaque:7"
+        assert request.headers["Authorization"] == "Bearer test-token"
+        if status == 200:
+            return httpx.Response(
+                status,
+                content=payload,
+                headers={"Content-Type": "text/event-stream"},
+            )
+        return httpx.Response(
+            status,
+            json={
+                "ok": False,
+                "error": {"code": "stream_error", "message": "Unavailable"},
+            },
+        )
+
+    with AuthenticatedClient(
+        base_url="http://holder.test",
+        token="test-token",
+        raise_on_unexpected_status=True,
+        httpx_args={"transport": httpx.MockTransport(respond)},
+    ) as client:
+        response = endpoint.sync_detailed(
+            *args,
+            client=client,
+            last_event_id="opaque:7",
+            **query,
+        )
+    assert response.status_code == status
+    if status == 200:
+        # Generation exposes the replay contract, but still buffers SSE bodies.
+        assert response.content == payload
+        assert response.parsed == payload.decode()
+    else:
+        assert isinstance(response.parsed, ErrorResponse)
+        assert response.parsed.error.code == "stream_error"
+
+
+def test_change_feed_omits_unspecified_replay_and_scope():
+    def respond(request):
+        assert not request.url.params
+        assert "Last-Event-ID" not in request.headers
+        return httpx.Response(200, text="event: ready\ndata: {}\n\n")
+
+    with Client(
+        base_url="http://holder.test",
+        httpx_args={"transport": httpx.MockTransport(respond)},
+    ) as client:
+        stream_changes.sync(client=client)
+
+
+def test_goodbye_is_an_explicit_authenticated_bodyless_request():
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        assert request.method == "POST"
+        assert request.url.path == "/bye"
+        assert request.content == b""
+        assert request.headers["Authorization"] == "Bearer test-token"
+        return httpx.Response(200, json={"ok": True})
+
+    with AuthenticatedClient(
+        base_url="http://holder.test",
+        token="test-token",
+        httpx_args={"transport": httpx.MockTransport(respond)},
+    ) as client:
+        response = post_bye.sync_detailed(client=client)
+    assert isinstance(response.parsed, ByeResponse)
+    assert response.parsed.ok is True
+    assert len(requests) == 1
 
 
 def test_authenticated_health_response():

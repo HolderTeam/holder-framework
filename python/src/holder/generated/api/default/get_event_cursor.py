@@ -5,35 +5,37 @@ import httpx
 
 from ... import errors
 from ...client import AuthenticatedClient, Client
-from ...models.ai_run_create_request import AiRunCreateRequest
 from ...models.error_response import ErrorResponse
-from ...types import Response
+from ...models.event_checkpoint_response import EventCheckpointResponse
+from ...types import UNSET, Response, Unset
 
 
 def _get_kwargs(
     *,
-    body: AiRunCreateRequest,
+    project_id: str | Unset = UNSET,
 ) -> dict[str, Any]:
-    headers: dict[str, Any] = {}
+
+    params: dict[str, Any] = {}
+
+    params["project_id"] = project_id
+
+    params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
     _kwargs: dict[str, Any] = {
-        "method": "post",
-        "url": "/ai/runs",
+        "method": "get",
+        "url": "/events/cursor",
+        "params": params,
     }
 
-    _kwargs["json"] = body.to_dict()
-
-    headers["Content-Type"] = "application/json"
-
-    _kwargs["headers"] = headers
     return _kwargs
 
 
 def _parse_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> ErrorResponse | str | None:
+) -> ErrorResponse | EventCheckpointResponse | None:
     if response.status_code == 200:
-        response_200 = response.text
+        response_200 = EventCheckpointResponse.from_dict(response.json())
+
         return response_200
 
     if response.status_code == 400:
@@ -45,6 +47,16 @@ def _parse_response(
         response_401 = ErrorResponse.from_dict(response.json())
 
         return response_401
+
+    if response.status_code == 404:
+        response_404 = ErrorResponse.from_dict(response.json())
+
+        return response_404
+
+    if response.status_code == 405:
+        response_405 = ErrorResponse.from_dict(response.json())
+
+        return response_405
 
     if response.status_code == 503:
         response_503 = ErrorResponse.from_dict(response.json())
@@ -59,7 +71,7 @@ def _parse_response(
 
 def _build_response(
     *, client: AuthenticatedClient | Client, response: httpx.Response
-) -> Response[ErrorResponse | str]:
+) -> Response[ErrorResponse | EventCheckpointResponse]:
     return Response(
         status_code=HTTPStatus(response.status_code),
         content=response.content,
@@ -71,28 +83,26 @@ def _build_response(
 def sync_detailed(
     *,
     client: AuthenticatedClient | Client,
-    body: AiRunCreateRequest,
-) -> Response[ErrorResponse | str]:
-    """Create and execute an AI run with routing and streaming
+    project_id: str | Unset = UNSET,
+) -> Response[ErrorResponse | EventCheckpointResponse]:
+    """Get a change-feed checkpoint before fetching a live snapshot
 
-     Creates one run and streams run_started (with run_id), provider-dependent
-    progress/router/fallback/chunk events, then done or failed. Every frame has an opaque replay ID.
-    Reconnect via GET /ai/runs/{run_id}/events rather than repeating this POST. Disconnecting does not
-    cancel execution; terminal events follow persisted status.
+     Fetch this checkpoint, read current entities, then subscribe using its cursor as Last-Event-ID.
+    Replayed invalidations close the race between snapshot reads and subscription.
 
     Args:
-        body (AiRunCreateRequest):
+        project_id (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ErrorResponse | str]
+        Response[ErrorResponse | EventCheckpointResponse]
     """
 
     kwargs = _get_kwargs(
-        body=body,
+        project_id=project_id,
     )
 
     response = client.get_httpx_client().request(
@@ -105,57 +115,53 @@ def sync_detailed(
 def sync(
     *,
     client: AuthenticatedClient | Client,
-    body: AiRunCreateRequest,
-) -> ErrorResponse | str | None:
-    """Create and execute an AI run with routing and streaming
+    project_id: str | Unset = UNSET,
+) -> ErrorResponse | EventCheckpointResponse | None:
+    """Get a change-feed checkpoint before fetching a live snapshot
 
-     Creates one run and streams run_started (with run_id), provider-dependent
-    progress/router/fallback/chunk events, then done or failed. Every frame has an opaque replay ID.
-    Reconnect via GET /ai/runs/{run_id}/events rather than repeating this POST. Disconnecting does not
-    cancel execution; terminal events follow persisted status.
+     Fetch this checkpoint, read current entities, then subscribe using its cursor as Last-Event-ID.
+    Replayed invalidations close the race between snapshot reads and subscription.
 
     Args:
-        body (AiRunCreateRequest):
+        project_id (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ErrorResponse | str
+        ErrorResponse | EventCheckpointResponse
     """
 
     return sync_detailed(
         client=client,
-        body=body,
+        project_id=project_id,
     ).parsed
 
 
 async def asyncio_detailed(
     *,
     client: AuthenticatedClient | Client,
-    body: AiRunCreateRequest,
-) -> Response[ErrorResponse | str]:
-    """Create and execute an AI run with routing and streaming
+    project_id: str | Unset = UNSET,
+) -> Response[ErrorResponse | EventCheckpointResponse]:
+    """Get a change-feed checkpoint before fetching a live snapshot
 
-     Creates one run and streams run_started (with run_id), provider-dependent
-    progress/router/fallback/chunk events, then done or failed. Every frame has an opaque replay ID.
-    Reconnect via GET /ai/runs/{run_id}/events rather than repeating this POST. Disconnecting does not
-    cancel execution; terminal events follow persisted status.
+     Fetch this checkpoint, read current entities, then subscribe using its cursor as Last-Event-ID.
+    Replayed invalidations close the race between snapshot reads and subscription.
 
     Args:
-        body (AiRunCreateRequest):
+        project_id (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        Response[ErrorResponse | str]
+        Response[ErrorResponse | EventCheckpointResponse]
     """
 
     kwargs = _get_kwargs(
-        body=body,
+        project_id=project_id,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -166,29 +172,27 @@ async def asyncio_detailed(
 async def asyncio(
     *,
     client: AuthenticatedClient | Client,
-    body: AiRunCreateRequest,
-) -> ErrorResponse | str | None:
-    """Create and execute an AI run with routing and streaming
+    project_id: str | Unset = UNSET,
+) -> ErrorResponse | EventCheckpointResponse | None:
+    """Get a change-feed checkpoint before fetching a live snapshot
 
-     Creates one run and streams run_started (with run_id), provider-dependent
-    progress/router/fallback/chunk events, then done or failed. Every frame has an opaque replay ID.
-    Reconnect via GET /ai/runs/{run_id}/events rather than repeating this POST. Disconnecting does not
-    cancel execution; terminal events follow persisted status.
+     Fetch this checkpoint, read current entities, then subscribe using its cursor as Last-Event-ID.
+    Replayed invalidations close the race between snapshot reads and subscription.
 
     Args:
-        body (AiRunCreateRequest):
+        project_id (str | Unset):
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
         httpx.TimeoutException: If the request takes longer than Client.timeout.
 
     Returns:
-        ErrorResponse | str
+        ErrorResponse | EventCheckpointResponse
     """
 
     return (
         await asyncio_detailed(
             client=client,
-            body=body,
+            project_id=project_id,
         )
     ).parsed

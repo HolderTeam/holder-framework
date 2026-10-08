@@ -72,41 +72,52 @@ python scripts/generate.py
 # Compare generated output without changing files.
 python scripts/generate.py --check
 
+# Also verify the snapshot against the owning contract (used by CI).
+python scripts/generate.py --check --source ../api/openapi.yaml
+
 # Refresh after changes have been tested in the contract's owning repository.
 python scripts/generate.py --source ../api/openapi.yaml
 ```
 
 The generator and Ruff versions are pinned in `pyproject.toml`. Generation runs
 in a temporary directory and fails on warnings before replacing the package.
-The provenance file records the daemon Git revision, whether the source schema
+The provenance file records the Framework Git revision, whether the source schema
 had uncommitted changes, its SHA-256 and tool versions. No schema transformations
 or custom templates are used. The config treats YAML download responses as
-plain text so their bodies are retained. CI checks generation, tests and builds
+plain text so their bodies are retained. CI checks snapshot freshness against
+`api/openapi.yaml`, generation, tests and builds
 on Python 3.11 and 3.14.
 
 ## Initial findings
 
-The current snapshot generates 105 endpoint modules and 239 model modules,
-roughly 40,000 lines of Python. All operations are in `api.default` because the
-contract supplies neither tags nor operation IDs; endpoint names follow HTTP
-methods and paths. Models are attrs classes with `to_dict` / `from_dict`, enums,
+The current snapshot generates 108 endpoint modules and 249 model modules,
+roughly 41,000 lines of Python. All operations are in `api.default` because the
+contract supplies no tags. Most endpoint names follow HTTP methods and paths;
+the change-feed endpoints use explicit operation IDs (`get_event_cursor` and
+`stream_changes`). Models are attrs classes with `to_dict` / `from_dict`, enums,
 and `UNSET` to distinguish omitted fields from explicit `None`. They are typed
 containers, not comprehensive runtime validators.
 
 The first generation exposed misplaced card PATCH and DELETE definitions in
 the daemon's OpenAPI contract. Those definitions were moved from the AI-message
 backlinks path to `/cards/{card_id}` in holder-daemon, with a regression test.
-The checked-in snapshot includes that correction; provenance records the
-historical daemon commit used for generation. The owning contract now lives at
-`holder-framework/api/openapi.yaml`.
+The checked-in snapshot includes that correction. The owning contract lives at
+`holder-framework/api/openapi.yaml`; provenance records the Framework revision
+used for the latest refresh.
 
-**Contract freshness:** as of 2026-10-08, the snapshot is behind the owning
-contract. It lacks `/events/cursor`, `/events`, `/bye` and newer SSE replay
-parameters/error responses. `generate.py --check` verifies output against the
-stored snapshot; it does not check that snapshot against `../api/openapi.yaml`.
-A contract refresh is pending.
+**Contract freshness:** refreshed on 2026-10-08. The low-level client includes
+`get_event_cursor` (`GET /events/cursor`), `stream_changes` (`GET /events`) and
+`post_bye` (`POST /bye`), plus `last_event_id` for the change feed and AI-run/pull
+streams. The change feed also accepts `project_id` and `last_revision`.
+Checkpoints preserve opaque cursors, nullable observed Git revisions and history
+URLs. `/bye` is an explicit request; closing a client does not send it automatically.
 
-**Real-time streaming is the main gap.** The three event-stream operations
+`generate.py --check --source ../api/openapi.yaml` verifies the verbatim snapshot
+against the owning API, validates provenance, and compares regenerated output
+without writing. CI uses this command, so owning-contract changes require a tested
+snapshot refresh. Plain `--check` remains available for snapshot-only checkouts.
+
+**Real-time streaming is the main gap.** The four event-stream operations
 generate ordinary HTTP requests which buffer the entire body and return a
 string. They do not yield individual events, reconnect or handle cancellation;
 long-lived streams may hit the HTTPX timeout. Binary asset downloads are also
@@ -115,5 +126,8 @@ would need a separately designed transport or handwritten implementation.
 
 Local tests cover every contract operation's generated method/path, module
 imports, bearer auth, query encoding, PATCH null/omission behavior, error
-envelopes, YAML, buffered events, binary downloads and an async public request.
+envelopes, checkpoint nulls/cursors, replay headers, documented stream errors,
+explicit bodyless goodbye, YAML, buffered events, binary downloads and an async
+public request. A tooling regression test rejects owning-contract drift without
+refreshing the snapshot.
 They use HTTPX's mock transport; live-daemon integration has not been tested.

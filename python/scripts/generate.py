@@ -31,19 +31,24 @@ def main() -> int:
         "--check", action="store_true", help="Compare without writing files"
     )
     parser.add_argument(
-        "--source", type=Path, help="Refresh from a tested daemon OpenAPI file"
+        "--source",
+        type=Path,
+        help="Refresh from a tested daemon OpenAPI file, or verify snapshot freshness with --check",
     )
     args = parser.parse_args()
-    if args.check and args.source:
-        parser.error("--check and --source cannot be combined")
+    if args.check and args.source and args.source.read_bytes() != SCHEMA.read_bytes():
+        parser.error(
+            "Contract snapshot differs from the owning API; test the daemon contract, "
+            "then refresh with --source without --check"
+        )
     for package, version in VERSIONS.items():
         if importlib.metadata.version(package) != version:
             parser.error(f"Install {package}=={version} before regenerating")
 
-    schema = args.source.resolve() if args.source else SCHEMA
+    schema = args.source.resolve() if args.source and not args.check else SCHEMA
     data = schema.read_bytes()
     provenance_path = ROOT / "openapi/provenance.json"
-    if not args.source:
+    if not args.source or args.check:
         provenance = json.loads(provenance_path.read_text())
         if provenance["sha256"] != hashlib.sha256(data).hexdigest():
             parser.error("Schema differs from its provenance; refresh with --source")

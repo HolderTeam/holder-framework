@@ -1,8 +1,8 @@
 {
-  "source": "holder-daemon/openapi.yaml",
-  "revision": "fedc52adcd443a9604b7f0d1343c6ad7ad78f615",
+  "source": "api/openapi.yaml",
+  "revision": "8448dab13e08aff7c9f227ee8314d5e07491b6ad",
   "schema_dirty": false,
-  "sha256": "037f9df97a4071db869d9f89259836e024638e56cdfd87f099ec520848d6dff6",
+  "sha256": "dd69c56f6488cb110742e78677c46734566d90cb20ce2c6d323efc5110c39aaa",
   "generator": {
     "openapi-python-client": "0.29.1",
     "ruff": "0.16.10"
