@@ -1123,7 +1123,7 @@ TEST_CASE("CardRoutes additional uncovered branches", "[card-routes]") {
     REQUIRE(end_payload["ok"] == true);
   }
 
-  SECTION("move up_level from missing parent falls back to root") {
+  SECTION("trashing a parent promotes its child, so up_level is then rejected") {
     create_card("66666666-6666-4666-8666-666666666666", "proj-1", "parent", 40);
     create_card(
         "77777777-7777-4777-8777-777777777777",
@@ -1140,14 +1140,14 @@ TEST_CASE("CardRoutes additional uncovered branches", "[card-routes]") {
     REQUIRE(trash_status == http::status::ok);
     REQUIRE(trash_payload["ok"] == true);
 
+    // Core moves the trashed card's live children up into its place.
     auto [move_status, move_payload] = call(
         http::verb::post,
         "/cards/77777777-7777-4777-8777-777777777777/move",
         {{"project_id", "proj-1"}, {"intent", "up_level"}}
     );
-    REQUIRE(move_status == http::status::ok);
-    REQUIRE(move_payload["ok"] == true);
-    REQUIRE(move_payload["data"]["parent_card_id"].is_null());
+    REQUIRE(move_status == http::status::unprocessable_entity);
+    REQUIRE(move_payload["error"]["code"] == "invalid_move_intent");
   }
 
   SECTION("move catches bad request from non-string intent") {
