@@ -212,8 +212,9 @@ std::optional<int> parse_limit_param(
   int limit = 200;
   if (!limit_raw.empty()) {
     try {
-      const long parsed = std::stol(limit_raw);
-      if (parsed <= 0 || parsed > 5000) {
+      std::size_t consumed = 0;
+      const long parsed = std::stol(limit_raw, &consumed);
+      if (consumed != limit_raw.size() || parsed <= 0 || parsed > 5000) {
         res = support::error_response(
             http::status::bad_request,
             "bad_request",
@@ -549,12 +550,23 @@ bool handle_card_routes(
     const std::string count_raw = param_get("count");
     const std::string limit_raw = param_get("limit");
     const std::string include_deleted_raw = param_get("include_deleted");
+    const std::string after_card_id = param_get("after_card_id");
     if (project_id.empty()) {
       res =
           support::error_response(http::status::bad_request, "bad_request", "Missing project_id.");
     } else {
       try {
         holder::card::CardRepo repo(db);
+        if ((!after_card_id.empty() && view_raw != "all") ||
+            (view_raw == "all" && (!tag_raw.empty() || !parent_raw.empty() || !order_raw.empty() ||
+                                   !include_deleted_raw.empty()))) {
+          res = support::error_response(
+              http::status::bad_request,
+              "bad_request",
+              "after_card_id requires view=all; all uses live card-id order without tag, parent, order or include_deleted."
+          );
+          return true;
+        }
         if (!tag_raw.empty()) {
           holder::card::TagRepo tag_repo(db);
           nlohmann::json data = nlohmann::json::array();
@@ -593,7 +605,15 @@ bool handle_card_routes(
         if (!include_count.has_value()) return true;
 
         std::vector<holder::model::Card> cards;
-        if (view == "tree") {
+        if (view == "all") {
+          const auto limit = parse_limit_param(limit_raw, res);
+          if (!limit.has_value()) return true;
+          cards = repo.list_page_by_card_id(
+              project_id,
+              after_card_id.empty() ? std::nullopt : std::optional<std::string>(after_card_id),
+              limit.value()
+          );
+        } else if (view == "tree") {
           const auto order = parse_card_order_param(order_raw, CardListOrder::TreeDefault, res);
           if (!order.has_value()) return true;
           cards = parent_raw.empty() ? repo.list_roots(project_id)
@@ -616,7 +636,7 @@ bool handle_card_routes(
           res = support::error_response(
               http::status::bad_request,
               "bad_request",
-              "Invalid view. Expected tree or recent."
+              "Invalid view. Expected tree, recent or all."
           );
           return true;
         }

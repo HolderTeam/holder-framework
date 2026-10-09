@@ -2,6 +2,7 @@ from enum import StrEnum
 
 
 class GetCardsView(StrEnum):
+    ALL = "all"
     RECENT = "recent"
     TREE = "tree"
 

@@ -6,6 +6,7 @@
 
 #include "ai/AiThreadRepo.h"
 #include "api/routes/CardRoutes.h"
+#include "api/support/HttpQuery.h"
 #include "card/CardStore.h"
 #include "card/LinkRepo.h"
 #include "http_test_helpers.h"
@@ -1834,4 +1835,86 @@ TEST_CASE("CardRoutes preserves CardStore tag mutation outcomes", "[card-routes]
       call(card_id, http::verb::get, {{"project_id", "proj-1"}, {"tag", "work"}});
   REQUIRE(method_status == http::status::method_not_allowed);
   REQUIRE(method["error"]["code"] == "method_not_allowed");
+}
+
+TEST_CASE("CardRoutes all view pages live cards within one project", "[card-routes][card-pages]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  holder::test::create_project(db, "proj-1", (dir / "repo1").string());
+  holder::test::create_project(db, "proj-2", (dir / "repo2").string());
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  const std::string first = "00000000-0000-4000-8000-000000000001";
+  const std::string second = "00000000-0000-4000-8000-000000000002";
+  const std::string third = "00000000-0000-4000-8000-000000000003";
+  const std::string deleted = "00000000-0000-4000-8000-000000000004";
+  const std::string foreign = "00000000-0000-4000-8000-000000000005";
+  holder::test::create_card_fixture(store, first, "proj-1", "one", "one", 10);
+  holder::test::create_card_fixture(store, second, "proj-1", "two", "two", 20, first);
+  holder::test::create_card_fixture(store, third, "proj-1", "three", "three", 30);
+  holder::test::create_card_fixture(store, deleted, "proj-1", "deleted", "deleted", 40);
+  holder::test::create_card_fixture(store, foreign, "proj-2", "foreign", "foreign", 50);
+  store.trash(deleted, 60);
+
+  auto call = [&](std::unordered_map<std::string, std::string> params) {
+    auto req = make_request(http::verb::get, "/cards");
+    http::response<http::string_body> res;
+    REQUIRE(
+        holder::api::routes::handle_card_routes(
+            "/cards",
+            req,
+            res,
+            db,
+            &store,
+            &fts,
+            [] {
+              return "unused";
+            },
+            map_param_getter(params)
+        )
+    );
+    return std::make_pair(res.result(), nlohmann::json::parse(res.body()));
+  };
+  auto [status, payload] = call({{"project_id", "proj-1"}, {"view", "all"}, {"limit", "2"}});
+  REQUIRE(status == http::status::ok);
+  REQUIRE(payload["data"].size() == 2);
+  CHECK(payload["data"][0]["card_id"] == first);
+  CHECK(payload["data"][1]["card_id"] == second);
+  auto [next_status, next] = call(
+      {{"project_id", "proj-1"}, {"view", "all"}, {"limit", "2"}, {"after_card_id", second}}
+  );
+  REQUIRE(next_status == http::status::ok);
+  REQUIRE(next["data"].size() == 1);
+  CHECK(next["data"][0]["card_id"] == third);
+  CHECK(call({{"project_id", "proj-1"}, {"view", "all"}, {"after_card_id", foreign}})
+            .second["data"]
+            .empty());
+  for (const auto& limit : {"0", "5001", "bad", "2junk"}) {
+    CHECK(
+        call({{"project_id", "proj-1"}, {"view", "all"}, {"limit", limit}}).first ==
+        http::status::bad_request
+    );
+  }
+  CHECK(call({{"view", "all"}}).first == http::status::bad_request);
+  CHECK(
+      call({{"project_id", "proj-1"}, {"after_card_id", first}}).first == http::status::bad_request
+  );
+  for (const auto& field : {"tag", "parent_card_id", "order", "include_deleted"}) {
+    CHECK(
+        call({{"project_id", "proj-1"}, {"view", "all"}, {field, "value"}}).first ==
+        http::status::bad_request
+    );
+  }
+}
+
+TEST_CASE("HTTP query values decode once and match complete parameter names", "[http-query]") {
+  using holder::api::support::decoded_query_param_value;
+  using holder::api::support::query_param_value;
+  CHECK(decoded_query_param_value("name=Collection+integration", "name") == "Collection integration");
+  CHECK(decoded_query_param_value("name=caf%C3%A9%20%26%2B", "name") == "café &+");
+  CHECK(decoded_query_param_value("name=%252B", "name") == "%2B");
+  CHECK(decoded_query_param_value("name=%z0%2", "name") == "%z0%2");
+  CHECK(query_param_value("other_name=wrong&name=right&name=later", "name") == "right");
+  CHECK(query_param_value("value=name%3Dwrong", "name").empty());
+  CHECK(query_param_value("name=raw%20value", "name") == "raw%20value");
 }

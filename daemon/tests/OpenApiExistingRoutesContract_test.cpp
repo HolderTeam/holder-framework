@@ -615,3 +615,16 @@ TEST_CASE("OpenAPI contracts the goodbye hint", "[openapi][idle]") {
   require_json_response_ref(bye, "401", "ErrorResponse");
   REQUIRE_FALSE(bye["requestBody"].IsDefined());
 }
+
+TEST_CASE("OpenAPI exposes project-scoped live card pages", "[openapi][card-pages]") {
+  const auto document = load_openapi();
+  const auto operation = document["paths"]["/cards"]["get"];
+  CHECK(parameter_named(operation, "project_id")["required"].as<bool>());
+  const auto modes =
+      parameter_named(operation, "view")["schema"]["enum"].as<std::vector<std::string>>();
+  CHECK(std::find(modes.begin(), modes.end(), "all") != modes.end());
+  CHECK(
+      parameter_named(operation, "after_card_id")["schema"]["type"].as<std::string>() == "string"
+  );
+  CHECK(parameter_named(operation, "limit")["schema"]["maximum"].as<int>() == 5000);
+}

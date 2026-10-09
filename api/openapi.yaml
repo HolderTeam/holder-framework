@@ -4167,9 +4167,15 @@ paths:
           required: false
           schema:
             type: string
-            enum: [tree, recent]
+            enum: [tree, recent, all]
             default: tree
-          description: Card list mode. tree returns one hierarchy level (roots or a parent's children); recent returns recently updated cards.
+          description: Card list mode. tree returns one hierarchy level (roots or a parent's children); recent returns recently updated cards; all pages live cards in ascending card_id order. all does not accept tag, parent_card_id, order or include_deleted. Pages reflect live state, not a frozen snapshot.
+        - in: query
+          name: after_card_id
+          required: false
+          schema:
+            type: string
+          description: Exclusive card_id cursor for view=all only. Omit for the first page; use the last returned card_id for the next page. A short page ends iteration.
         - in: query
           name: parent_card_id
           required: false
@@ -4200,7 +4206,7 @@ paths:
             minimum: 1
             maximum: 5000
             default: 200
-          description: Maximum number of cards when view=recent.
+          description: Maximum number of cards when view=recent or view=all.
         - in: query
           name: include_deleted
           required: false

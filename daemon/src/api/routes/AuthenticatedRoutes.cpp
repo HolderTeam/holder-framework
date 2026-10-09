@@ -50,7 +50,7 @@ AuthenticatedDispatchResult dispatch_authenticated_routes(
     std::shared_ptr<holder::api::support::SseRegistry> streams
 ) {
   auto param = [&](const std::string& key) -> std::string {
-    return support::query_param_value(query_string, key);
+    return support::decoded_query_param_value(query_string, key);
   };
 
   const std::string resource = first_segment(path);
