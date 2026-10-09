@@ -129,9 +129,9 @@ def test_project_scoped_collections_against_daemon(daemon):
         assert {card.id for card in cards} == (set(ids) - {ids[1]}) | {child}
         assert len(list(project.cards.roots())) == 204
         assert project.cards.get(ids[0]).children[0].id == child
-        assert len(list(project.cards.filter(tag="research"))) == 205
-        assert len(list(project.cards.roots().filter(tag="research"))) == 204
-        assert project.cards.get(ids[0]).children.filter(tag="research")[0].id == child
+        assert len(list(project.cards.filter(tag="Research"))) == 205
+        assert len(list(project.cards.roots().filter(tag="RESEARCH"))) == 204
+        assert project.cards.get(ids[0]).children.filter(tag="ReSeArCh")[0].id == child
         with pytest.raises(NotFoundError):
             project.cards.get(foreign)
         card = project.cards.get(ids[0])
