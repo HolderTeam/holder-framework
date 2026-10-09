@@ -40,11 +40,6 @@ nlohmann::json decode_cursor(const std::string& value) {
   return nlohmann::json::parse(decoded);
 }
 
-bool boolean_param(const std::string& raw) {
-  if (raw.empty() || raw == "false") return false;
-  if (raw == "true") return true;
-  throw std::invalid_argument("include_deleted must be true or false.");
-}
 } // namespace
 
 bool handle_project_card_routes(
@@ -89,20 +84,14 @@ bool handle_project_card_routes(
         throw std::invalid_argument("parent must be roots or a card UUID.");
       query.parent_card_id = parent == "roots" ? "" : parent;
     }
-    query.include_deleted = boolean_param(param_get("include_deleted"));
     const auto order_raw = param_get("order");
     const auto order = order_raw.empty() ? "card_id_asc" : order_raw;
     if (order == "updated_desc")
       query.order = holder::card::CardPageOrder::UpdatedDesc;
     else if (order != "card_id_asc")
       throw std::invalid_argument("Invalid order.");
-    const nlohmann::json scope = {
-        {"project_id", project_id},
-        {"tag", tag},
-        {"parent", parent},
-        {"include_deleted", query.include_deleted},
-        {"order", order}
-    };
+    const nlohmann::json scope =
+        {{"project_id", project_id}, {"tag", tag}, {"parent", parent}, {"order", order}};
     const auto cursor = param_get("cursor");
     if (!cursor.empty()) {
       const auto decoded = decode_cursor(cursor);
