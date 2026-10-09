@@ -3262,7 +3262,7 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
   /projects/{project_id}/cards:
     get:
-      summary: Page through a project's cards
+      summary: Page through a project's live cards
       description: Filters combine. Each page reads current data; iteration is not a snapshot.
       parameters:
         - in: path
@@ -3286,11 +3286,6 @@ paths:
                 format: uuid
                 pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[47][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
           description: Omit for all hierarchy levels; roots selects root cards; a card ID selects its immediate children.
-        - in: query
-          name: include_deleted
-          schema:
-            type: boolean
-            default: false
         - in: query
           name: order
           schema:
