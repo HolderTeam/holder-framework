@@ -63,11 +63,12 @@ TEST_CASE(
     Params params{change, {"cursor", cursor}};
     CHECK(call(params).first == http::status::bad_request);
   }
-  Params filtered{{"tag", "work"}, {"parent", first}, {"order", "updated_desc"}, {"limit", "1"}};
+  Params filtered{{"tag", "Work"}, {"parent", first}, {"order", "updated_desc"}, {"limit", "1"}};
   auto page = call(filtered).second["data"];
   REQUIRE(page["items"].size() == 1);
   CHECK(page["items"][0]["card_id"] == third);
   filtered["cursor"] = page["next_cursor"].get<std::string>();
+  filtered["tag"] = "WORK";
   page = call(filtered).second["data"];
   REQUIRE(page["items"].size() == 1);
   CHECK(page["items"][0]["card_id"] == second);
@@ -75,6 +76,7 @@ TEST_CASE(
   CHECK(call({{"tag", "work"}, {"parent", "roots"}}).second["data"]["items"].size() == 1);
   CHECK(call({}).second["data"]["items"].size() == 3);
   CHECK(call({{"tag", "work"}}).second["data"]["items"].size() == 3);
+  CHECK(call({{"tag", "WORK"}}).second["data"] == call({{"tag", "work"}}).second["data"]);
   CHECK(call({{"tag", "missing"}}).second["data"]["items"].empty());
   for (const auto& limit : {"0", "5001", "bad", "2junk", "-1", "99999999999999999"})
     CHECK(call({{"limit", limit}}).first == http::status::bad_request);
@@ -89,18 +91,20 @@ TEST_CASE(
     http::request<http::string_body> req{http::verb::get, "/cards", 11};
     http::response<http::string_body> res;
     params["project_id"] = "p";
-    REQUIRE(holder::api::routes::handle_card_routes(
-        "/cards",
-        req,
-        res,
-        db,
-        &store,
-        &fts,
-        [] {
-          return "unused";
-        },
-        getter(params)
-    ));
+    REQUIRE(
+        holder::api::routes::handle_card_routes(
+            "/cards",
+            req,
+            res,
+            db,
+            &store,
+            &fts,
+            [] {
+              return "unused";
+            },
+            getter(params)
+        )
+    );
     return std::make_pair(res.result(), nlohmann::json::parse(res.body()));
   };
   CHECK(display({}).second["data"].size() == 1);
@@ -109,6 +113,19 @@ TEST_CASE(
   CHECK(display({{"view", "recent"}, {"limit", "2junk"}}).second["data"].size() == 2);
   CHECK(display({{"view", "all"}}).first == http::status::bad_request);
   CHECK(display({{"after_card_id", third}}).second["data"].size() == 1);
+
+  // Real trash leaves children live: flat pages must still expose them.
+  store.trash(first, 70);
+  page = call({{"limit", "1"}}).second["data"];
+  REQUIRE(page["items"].size() == 1);
+  CHECK(page["items"][0]["card_id"] == second);
+  REQUIRE(page["next_cursor"].is_string());
+  page = call({{"limit", "1"}, {"cursor", page["next_cursor"].get<std::string>()}}).second["data"];
+  REQUIRE(page["items"].size() == 1);
+  CHECK(page["items"][0]["card_id"] == third);
+  CHECK(page["next_cursor"].is_null());
+  CHECK(call({{"parent", "roots"}}).second["data"]["items"].empty());
+  CHECK(call({{"parent", first}}).second["data"]["items"].size() == 2);
 }
 
 TEST_CASE("Project card routes decline unrelated paths", "[card-pages]") {
