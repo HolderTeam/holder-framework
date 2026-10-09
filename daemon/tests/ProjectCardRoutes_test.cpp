@@ -114,7 +114,7 @@ TEST_CASE(
   CHECK(display({{"view", "all"}}).first == http::status::bad_request);
   CHECK(display({{"after_card_id", third}}).second["data"].size() == 1);
 
-  // Real trash leaves children live: flat pages must still expose them.
+  // Real trash promotes live children to roots; flat pages still expose them.
   store.trash(first, 70);
   page = call({{"limit", "1"}}).second["data"];
   REQUIRE(page["items"].size() == 1);
@@ -124,8 +124,13 @@ TEST_CASE(
   REQUIRE(page["items"].size() == 1);
   CHECK(page["items"][0]["card_id"] == third);
   CHECK(page["next_cursor"].is_null());
-  CHECK(call({{"parent", "roots"}}).second["data"]["items"].empty());
-  CHECK(call({{"parent", first}}).second["data"]["items"].size() == 2);
+  const auto roots = call({{"parent", "roots"}}).second["data"]["items"];
+  REQUIRE(roots.size() == 2);
+  CHECK(roots[0]["card_id"] == second);
+  CHECK(roots[1]["card_id"] == third);
+  CHECK(roots[0]["parent_card_id"].is_null());
+  CHECK(roots[1]["parent_card_id"].is_null());
+  CHECK(call({{"parent", first}}).second["data"]["items"].empty());
 }
 
 TEST_CASE("Project card routes decline unrelated paths", "[card-pages]") {
