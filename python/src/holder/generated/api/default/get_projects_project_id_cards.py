@@ -21,7 +21,6 @@ def _get_kwargs(
     *,
     tag: str | Unset = UNSET,
     parent: GetProjectsProjectIdCardsParentType0 | Unset | UUID = UNSET,
-    include_deleted: bool | Unset = False,
     order: GetProjectsProjectIdCardsOrder
     | Unset = GetProjectsProjectIdCardsOrder.CARD_ID_ASC,
     limit: int | Unset = 200,
@@ -41,8 +40,6 @@ def _get_kwargs(
         json_parent = str(parent)
 
     params["parent"] = json_parent
-
-    params["include_deleted"] = include_deleted
 
     json_order: str | Unset = UNSET
     if not isinstance(order, Unset):
@@ -123,13 +120,12 @@ def sync_detailed(
     client: AuthenticatedClient | Client,
     tag: str | Unset = UNSET,
     parent: GetProjectsProjectIdCardsParentType0 | Unset | UUID = UNSET,
-    include_deleted: bool | Unset = False,
     order: GetProjectsProjectIdCardsOrder
     | Unset = GetProjectsProjectIdCardsOrder.CARD_ID_ASC,
     limit: int | Unset = 200,
     cursor: str | Unset = UNSET,
 ) -> Response[CardPageResponse | ErrorResponse]:
-    """Page through a project's cards
+    """Page through a project's live cards
 
      Filters combine. Each page reads current data; iteration is not a snapshot.
 
@@ -137,7 +133,6 @@ def sync_detailed(
         project_id (str):
         tag (str | Unset):
         parent (GetProjectsProjectIdCardsParentType0 | Unset | UUID):
-        include_deleted (bool | Unset):  Default: False.
         order (GetProjectsProjectIdCardsOrder | Unset):  Default:
             GetProjectsProjectIdCardsOrder.CARD_ID_ASC.
         limit (int | Unset):  Default: 200.
@@ -155,7 +150,6 @@ def sync_detailed(
         project_id=project_id,
         tag=tag,
         parent=parent,
-        include_deleted=include_deleted,
         order=order,
         limit=limit,
         cursor=cursor,
@@ -174,13 +168,12 @@ def sync(
     client: AuthenticatedClient | Client,
     tag: str | Unset = UNSET,
     parent: GetProjectsProjectIdCardsParentType0 | Unset | UUID = UNSET,
-    include_deleted: bool | Unset = False,
     order: GetProjectsProjectIdCardsOrder
     | Unset = GetProjectsProjectIdCardsOrder.CARD_ID_ASC,
     limit: int | Unset = 200,
     cursor: str | Unset = UNSET,
 ) -> CardPageResponse | ErrorResponse | None:
-    """Page through a project's cards
+    """Page through a project's live cards
 
      Filters combine. Each page reads current data; iteration is not a snapshot.
 
@@ -188,7 +181,6 @@ def sync(
         project_id (str):
         tag (str | Unset):
         parent (GetProjectsProjectIdCardsParentType0 | Unset | UUID):
-        include_deleted (bool | Unset):  Default: False.
         order (GetProjectsProjectIdCardsOrder | Unset):  Default:
             GetProjectsProjectIdCardsOrder.CARD_ID_ASC.
         limit (int | Unset):  Default: 200.
@@ -207,7 +199,6 @@ def sync(
         client=client,
         tag=tag,
         parent=parent,
-        include_deleted=include_deleted,
         order=order,
         limit=limit,
         cursor=cursor,
@@ -220,13 +211,12 @@ async def asyncio_detailed(
     client: AuthenticatedClient | Client,
     tag: str | Unset = UNSET,
     parent: GetProjectsProjectIdCardsParentType0 | Unset | UUID = UNSET,
-    include_deleted: bool | Unset = False,
     order: GetProjectsProjectIdCardsOrder
     | Unset = GetProjectsProjectIdCardsOrder.CARD_ID_ASC,
     limit: int | Unset = 200,
     cursor: str | Unset = UNSET,
 ) -> Response[CardPageResponse | ErrorResponse]:
-    """Page through a project's cards
+    """Page through a project's live cards
 
      Filters combine. Each page reads current data; iteration is not a snapshot.
 
@@ -234,7 +224,6 @@ async def asyncio_detailed(
         project_id (str):
         tag (str | Unset):
         parent (GetProjectsProjectIdCardsParentType0 | Unset | UUID):
-        include_deleted (bool | Unset):  Default: False.
         order (GetProjectsProjectIdCardsOrder | Unset):  Default:
             GetProjectsProjectIdCardsOrder.CARD_ID_ASC.
         limit (int | Unset):  Default: 200.
@@ -252,7 +241,6 @@ async def asyncio_detailed(
         project_id=project_id,
         tag=tag,
         parent=parent,
-        include_deleted=include_deleted,
         order=order,
         limit=limit,
         cursor=cursor,
@@ -269,13 +257,12 @@ async def asyncio(
     client: AuthenticatedClient | Client,
     tag: str | Unset = UNSET,
     parent: GetProjectsProjectIdCardsParentType0 | Unset | UUID = UNSET,
-    include_deleted: bool | Unset = False,
     order: GetProjectsProjectIdCardsOrder
     | Unset = GetProjectsProjectIdCardsOrder.CARD_ID_ASC,
     limit: int | Unset = 200,
     cursor: str | Unset = UNSET,
 ) -> CardPageResponse | ErrorResponse | None:
-    """Page through a project's cards
+    """Page through a project's live cards
 
      Filters combine. Each page reads current data; iteration is not a snapshot.
 
@@ -283,7 +270,6 @@ async def asyncio(
         project_id (str):
         tag (str | Unset):
         parent (GetProjectsProjectIdCardsParentType0 | Unset | UUID):
-        include_deleted (bool | Unset):  Default: False.
         order (GetProjectsProjectIdCardsOrder | Unset):  Default:
             GetProjectsProjectIdCardsOrder.CARD_ID_ASC.
         limit (int | Unset):  Default: 200.
@@ -303,7 +289,6 @@ async def asyncio(
             client=client,
             tag=tag,
             parent=parent,
-            include_deleted=include_deleted,
             order=order,
             limit=limit,
             cursor=cursor,
