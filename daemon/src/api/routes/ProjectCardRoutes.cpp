@@ -72,10 +72,11 @@ bool handle_project_card_routes(
           limit > 5000)
         throw std::invalid_argument("limit must be an integer from 1 to 5000.");
     }
-    const auto tag = param_get("tag");
+    auto tag = param_get("tag");
     if (!tag.empty()) {
-      if (!holder::core::is_valid_tag(tag) || tag != holder::core::normalize_tag(tag))
-        throw std::invalid_argument("tag must be normalized without a leading #.");
+      if (!holder::core::is_valid_tag(tag))
+        throw std::invalid_argument("Invalid tag. Omit the leading #.");
+      tag = holder::core::normalize_tag(tag);
       query.tag = tag;
     }
     const auto parent = param_get("parent");
