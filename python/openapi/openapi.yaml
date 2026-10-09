@@ -3275,7 +3275,7 @@ paths:
           schema:
             type: string
             minLength: 1
-          description: Exact normalized tag, without the leading #.
+          description: Exact tag match, case-insensitive, without the leading #.
         - in: query
           name: parent
           schema:
