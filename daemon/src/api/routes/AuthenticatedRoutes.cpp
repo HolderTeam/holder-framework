@@ -5,6 +5,7 @@
 #include "api/routes/CardRoutes.h"
 #include "api/routes/HistoryRoutes.h"
 #include "api/routes/MilestoneRoutes.h"
+#include "api/routes/ProjectCardRoutes.h"
 #include "api/routes/ProjectRoutes.h"
 #include "api/routes/RebuildRoutes.h"
 #include "api/routes/ReindexRoutes.h"
@@ -49,13 +50,17 @@ AuthenticatedDispatchResult dispatch_authenticated_routes(
     const std::function<std::string()>& uuid_v4,
     std::shared_ptr<holder::api::support::SseRegistry> streams
 ) {
-  auto param = [&](const std::string& key) -> std::string {
+  const std::string resource = first_segment(path);
+  auto decoded_param = [&](const std::string& key) -> std::string {
     return support::decoded_query_param_value(query_string, key);
   };
-
-  const std::string resource = first_segment(path);
+  auto param = [&](const std::string& key) -> std::string {
+    return path == "/projects" ? decoded_param(key) : support::query_param_value(query_string, key);
+  };
 
   if (resource == "projects" || resource == "recovery-token") {
+    if (resource == "projects" && handle_project_card_routes(path, req, res, db, decoded_param))
+      return {};
     if (resource == "projects" && handle_history_routes(path, req, res, db, param, card_store))
       return {};
     if (handle_project_routes(path, req, res, db, git_ops, uuid_v4, param)) return {};

@@ -60,8 +60,8 @@ bool handle_nudge_list_route(
   const auto query_pos = target.find('?');
   const auto query_string = query_pos == std::string::npos ? std::string()
                                                            : target.substr(query_pos + 1);
-  const auto project_id = support::decoded_query_param_value(query_string, "project_id");
-  const auto card_id_raw = support::decoded_query_param_value(query_string, "card_id");
+  const auto project_id = support::query_param_value(query_string, "project_id");
+  const auto card_id_raw = support::query_param_value(query_string, "card_id");
   if (project_id.empty()) {
     res = support::error_response(
         http::status::bad_request,

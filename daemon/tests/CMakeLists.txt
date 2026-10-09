@@ -94,6 +94,7 @@ add_executable(holder_daemon_tests
   HttpMilestones_test.cpp
   CardReferenceRoutes_test.cpp
   CardRoutes_test.cpp
+  ProjectCardRoutes_test.cpp
   HistoryRoutes_test.cpp
   OpenApiExistingRoutesContract_test.cpp
   HttpLinks_test.cpp
@@ -178,6 +179,7 @@ add_executable(holder_daemon_tests
   ../src/api/routes/ai/threads/AiThreadItemRoutes.cpp
   ../src/api/routes/CardReferenceRoutes.cpp
   ../src/api/routes/CardRoutes.cpp
+  ../src/api/routes/ProjectCardRoutes.cpp
   ../src/api/routes/HistoryRoutes.cpp
   ../src/api/routes/MilestoneRoutes.cpp
   ../src/api/routes/ProjectRoutes.cpp

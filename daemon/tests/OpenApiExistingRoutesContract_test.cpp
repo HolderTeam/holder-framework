@@ -616,15 +616,29 @@ TEST_CASE("OpenAPI contracts the goodbye hint", "[openapi][idle]") {
   REQUIRE_FALSE(bye["requestBody"].IsDefined());
 }
 
-TEST_CASE("OpenAPI exposes project-scoped live card pages", "[openapi][card-pages]") {
+TEST_CASE(
+    "OpenAPI separates project card pages from the legacy display route",
+    "[openapi][card-pages]"
+) {
   const auto document = load_openapi();
-  const auto operation = document["paths"]["/cards"]["get"];
-  CHECK(parameter_named(operation, "project_id")["required"].as<bool>());
-  const auto modes =
-      parameter_named(operation, "view")["schema"]["enum"].as<std::vector<std::string>>();
-  CHECK(std::find(modes.begin(), modes.end(), "all") != modes.end());
+  const auto legacy = document["paths"]["/cards"]["get"];
   CHECK(
-      parameter_named(operation, "after_card_id")["schema"]["type"].as<std::string>() == "string"
+      parameter_named(legacy, "view")["schema"]["enum"].as<std::vector<std::string>>() ==
+      std::vector<std::string>{"tree", "recent"}
   );
+  for (const auto& param : legacy["parameters"])
+    CHECK(param["name"].as<std::string>() != "after_card_id");
+  const auto operation = document["paths"]["/projects/{project_id}/cards"]["get"];
+  CHECK(parameter_named(operation, "project_id")["in"].as<std::string>() == "path");
+  CHECK(parameter_named(operation, "project_id")["required"].as<bool>());
   CHECK(parameter_named(operation, "limit")["schema"]["maximum"].as<int>() == 5000);
+  CHECK(parameter_named(operation, "parent")["schema"]["oneOf"].size() == 2);
+  CHECK(
+      parameter_named(operation, "include_deleted")["schema"]["type"].as<std::string>() == "boolean"
+  );
+  require_json_response_ref(operation, "200", "CardPageResponse");
+  CHECK(
+      required_properties(document["components"]["schemas"]["CardPage"]) ==
+      std::vector<std::string>{"items", "next_cursor"}
+  );
 }

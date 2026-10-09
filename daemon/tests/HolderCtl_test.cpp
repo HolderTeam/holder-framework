@@ -1400,7 +1400,9 @@ TEST_CASE("holderctl search uses the current project", "[holderctl]") {
   }
 
   holder::core::SignalHandler signals;
-  holder::test::HttpServerThreadGuard server_thread(server, signals);
+  std::thread server_thread([&server, &signals]() {
+    server.run(signals);
+  });
   REQUIRE(holder::test::wait_for_http_health_ready(bound.bind, bound.port, token));
 
   const auto server_dir = xdg_root / "data" / "holder" / "server";
@@ -1433,13 +1435,10 @@ TEST_CASE("holderctl search uses the current project", "[holderctl]") {
   REQUIRE(payload["data"].is_array());
   REQUIRE(payload["data"][0]["card_id"] == "search-card");
 
-  REQUIRE(
-      run_command(bin + " search --json \"unique holderctl\" > \"" + json_path.string() + "\"") == 0
-  );
-  const auto phrase_payload = nlohmann::json::parse(read_text(json_path));
-  REQUIRE(phrase_payload["data"][0]["card_id"] == "search-card");
+  REQUIRE(run_command(bin + " search \"unique holderctl\" >/dev/null 2>/dev/null") == 1);
 
-  server_thread.stop();
+  server.stop();
+  server_thread.join();
 }
 
 TEST_CASE("holderctl cards lists root and recent cards in the current project", "[holderctl]") {

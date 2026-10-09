@@ -849,6 +849,27 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CardListItem"
+    CardPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/CardListItem"
+        next_cursor:
+          type: string
+          nullable: true
+          description: Continue with this cursor, or null when there are no more results.
+    CardPageResponse:
+      type: object
+      required: [ok, data]
+      properties:
+        ok:
+          type: boolean
+          enum: [true]
+        data:
+          $ref: "#/components/schemas/CardPage"
     ProjectTag:
       type: object
       required: [tag, card_count]
@@ -3239,6 +3260,95 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
+  /projects/{project_id}/cards:
+    get:
+      summary: Page through a project's cards
+      description: Filters combine. Each page reads current data; iteration is not a snapshot.
+      parameters:
+        - in: path
+          name: project_id
+          required: true
+          schema:
+            type: string
+        - in: query
+          name: tag
+          schema:
+            type: string
+            minLength: 1
+          description: Exact normalized tag, without the leading #.
+        - in: query
+          name: parent
+          schema:
+            oneOf:
+              - type: string
+                enum: [roots]
+              - type: string
+                format: uuid
+                pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[47][0-9a-fA-F]{3}-[89aAbB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$'
+          description: Omit for all hierarchy levels; roots selects root cards; a card ID selects its immediate children.
+        - in: query
+          name: include_deleted
+          schema:
+            type: boolean
+            default: false
+        - in: query
+          name: order
+          schema:
+            type: string
+            enum: [card_id_asc, updated_desc]
+            default: card_id_asc
+          description: updated_desc breaks ties by descending card ID.
+        - in: query
+          name: limit
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 200
+        - in: query
+          name: cursor
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 8192
+          description: Continuation from next_cursor. Keep the project, filters and ordering unchanged.
+      responses:
+        "200":
+          description: A page of matching cards
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardPageResponse"
+        "400":
+          description: Invalid parameter or cursor, including a cursor from a different query
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Project not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "405":
+          description: Method not allowed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "500":
+          description: Internal server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
   /projects/{project_id}/tags:
     get:
       summary: List project tags with live-card counts
@@ -4167,15 +4277,9 @@ paths:
           required: false
           schema:
             type: string
-            enum: [tree, recent, all]
+            enum: [tree, recent]
             default: tree
-          description: Card list mode. tree returns one hierarchy level (roots or a parent's children); recent returns recently updated cards; all pages live cards in ascending card_id order. all does not accept tag, parent_card_id, order or include_deleted. Pages reflect live state, not a frozen snapshot.
-        - in: query
-          name: after_card_id
-          required: false
-          schema:
-            type: string
-          description: Exclusive card_id cursor for view=all only. Omit for the first page; use the last returned card_id for the next page. A short page ends iteration.
+          description: Card list mode. tree returns one hierarchy level (roots or a parent's children); recent returns recently updated cards.
         - in: query
           name: parent_card_id
           required: false
@@ -4206,7 +4310,7 @@ paths:
             minimum: 1
             maximum: 5000
             default: 200
-          description: Maximum number of cards when view=recent or view=all.
+          description: Maximum number of cards when view=recent.
         - in: query
           name: include_deleted
           required: false

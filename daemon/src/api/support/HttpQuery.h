@@ -5,25 +5,31 @@
 namespace holder::api::support {
 
 inline std::string query_param_value(const std::string& query_string, const std::string& key) {
-  std::size_t start = 0;
-  while (start < query_string.size()) {
-    const auto end = query_string.find('&', start);
-    const auto field = query_string.substr(start, end == std::string::npos ? end : end - start);
-    const auto equals = field.find('=');
-    if (equals != std::string::npos && field.substr(0, equals) == key) {
-      return field.substr(equals + 1);
-    }
-    if (end == std::string::npos) break;
-    start = end + 1;
-  }
-  return {};
+  const std::string needle = key + "=";
+  const auto pos = query_string.find(needle);
+  if (pos == std::string::npos) return {};
+  const auto start = pos + needle.size();
+  const auto end = query_string.find('&', start);
+  return query_string.substr(start, end == std::string::npos ? std::string::npos : end - start);
 }
 
 inline std::string decoded_query_param_value(
     const std::string& query_string,
     const std::string& key
 ) {
-  const auto raw = query_param_value(query_string, key);
+  std::string raw;
+  std::size_t start = 0;
+  while (start < query_string.size()) {
+    const auto end = query_string.find('&', start);
+    const auto field = query_string.substr(start, end == std::string::npos ? end : end - start);
+    const auto equals = field.find('=');
+    if (equals != std::string::npos && field.substr(0, equals) == key) {
+      raw = field.substr(equals + 1);
+      break;
+    }
+    if (end == std::string::npos) break;
+    start = end + 1;
+  }
   const auto hex = [](char value) -> int {
     if (value >= '0' && value <= '9') return value - '0';
     if (value >= 'a' && value <= 'f') return value - 'a' + 10;

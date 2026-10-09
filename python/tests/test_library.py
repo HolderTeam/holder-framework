@@ -137,25 +137,32 @@ def test_cards_paginate_and_metadata_does_not_fetch_content():
 
     def respond(request):
         requests.append(request)
-        if request.url.path.startswith("/projects"):
+        if request.url.path.startswith("/projects") and not request.url.path.endswith(
+            "/cards"
+        ):
             return ok(project_payload())
         if request.url.path.startswith("/cards/"):
             return ok(card_payload(content=True))
-        assert request.url.params["project_id"] == "p-0"
-        assert request.url.params["view"] == "all"
-        after = request.url.params.get("after_card_id")
-        start = 0 if after is None else int(after[2:]) + 1
-        return ok([card_payload(i) for i in range(start, min(start + 200, 401))])
+        assert request.url.path == "/projects/p-0/cards"
+        after = request.url.params.get("cursor")
+        start = 0 if after is None else int(after)
+        stop = min(start + 200, 401)
+        return ok(
+            {
+                "items": [card_payload(i) for i in range(start, stop)],
+                "next_cursor": str(stop) if stop < 401 else None,
+            }
+        )
 
     with holder_for(respond) as h:
         project = h.projects.get("p-0")
         cards = list(project.cards)
         assert len(cards) == 401
         assert isinstance(cards[0], Card)
-        assert [r.url.params.get("after_card_id") for r in requests[1:]] == [
+        assert [r.url.params.get("cursor") for r in requests[1:]] == [
             None,
-            "c-0199",
-            "c-0399",
+            "200",
+            "400",
         ]
         assert len(requests) == 4
         assert cards[0].content == "current body"
@@ -173,7 +180,9 @@ def test_scoped_navigation_queries_membership_and_refresh():
 
     def respond(request):
         requests.append(request)
-        if request.url.path.startswith("/projects"):
+        if request.url.path.startswith("/projects") and not request.url.path.endswith(
+            "/cards"
+        ):
             return ok(project_payload())
         if request.url.path.startswith("/cards/"):
             return ok(
@@ -184,24 +193,26 @@ def test_scoped_navigation_queries_membership_and_refresh():
                     content=True,
                 )
             )
-        return ok([card_payload()])
+        return ok({"items": [card_payload()], "next_cursor": None})
 
     with holder_for(respond) as h:
         project = h.projects.get("p-0")
         tagged = project.cards.filter(tag="research").filter(tag="other")
         assert tagged[0].id == "c-0000"
         assert requests[-1].url.params["tag"] == "other"
-        assert "after_card_id" not in requests[-1].url.params
+        assert "cursor" not in requests[-1].url.params
         card = project.cards.roots()[0]
-        assert requests[-1].url.params["view"] == "tree"
+        assert requests[-1].url.params["parent"] == "roots"
         assert card.children[0].id == "c-0000"
-        assert requests[-1].url.params["parent_card_id"] == card.id
+        assert requests[-1].url.params["parent"] == card.id
         with pytest.raises(NotFoundError):
             project.cards.get("foreign")
-        with pytest.raises(ValueError):
-            tagged.roots()
-        with pytest.raises(ValueError):
-            project.cards.roots().filter(tag="research")
+        assert tagged.roots()[0].id == card.id
+        assert requests[-1].url.params["tag"] == "other"
+        assert requests[-1].url.params["parent"] == "roots"
+        assert project.cards.roots().filter(tag="research")[0].id == card.id
+        assert requests[-1].url.params["tag"] == "research"
+        assert requests[-1].url.params["parent"] == "roots"
         project.refresh()
         card.refresh()
         assert card.content == "current body"
@@ -214,7 +225,9 @@ def test_update_fetches_fresh_body_and_refreshes_after_write():
     def respond(request):
         nonlocal title
         requests.append(request)
-        if request.url.path.startswith("/projects"):
+        if request.url.path.startswith("/projects") and not request.url.path.endswith(
+            "/cards"
+        ):
             return ok(project_payload())
         if request.method == "PATCH":
             body = json.loads(request.content)
@@ -238,7 +251,9 @@ def test_update_fetches_fresh_body_and_refreshes_after_write():
 
 def test_content_only_update_preserves_omitted_title():
     def respond(request):
-        if request.url.path.startswith("/projects"):
+        if request.url.path.startswith("/projects") and not request.url.path.endswith(
+            "/cards"
+        ):
             return ok(project_payload())
         if request.method == "PATCH":
             assert json.loads(request.content)["content"] == "replacement"
@@ -335,7 +350,9 @@ def test_no_retry_of_write_or_explicit_credentials(monkeypatch):
     writes = []
 
     def respond(request):
-        if request.url.path.startswith("/projects"):
+        if request.url.path.startswith("/projects") and not request.url.path.endswith(
+            "/cards"
+        ):
             return ok(project_payload())
         if request.method == "PATCH":
             writes.append(request)
@@ -415,7 +432,10 @@ def test_foreign_card_listing_is_rejected_before_caching():
         return (
             ok(project_payload())
             if request.url.path.startswith("/projects")
-            else ok([card_payload(project_id="foreign")])
+            and not request.url.path.endswith("/cards")
+            else ok(
+                {"items": [card_payload(project_id="foreign")], "next_cursor": None}
+            )
         )
 
     with (
@@ -430,7 +450,9 @@ def test_update_never_writes_a_card_that_changed_project():
     writes = []
 
     def respond(request):
-        if request.url.path.startswith("/projects"):
+        if request.url.path.startswith("/projects") and not request.url.path.endswith(
+            "/cards"
+        ):
             return ok(project_payload())
         if request.method == "PATCH":
             writes.append(request)
@@ -453,7 +475,9 @@ def test_title_update_preserves_body_changed_since_card_was_loaded():
 
     def respond(request):
         nonlocal current_body
-        if request.url.path.startswith("/projects"):
+        if request.url.path.startswith("/projects") and not request.url.path.endswith(
+            "/cards"
+        ):
             return ok(project_payload())
         if request.method == "PATCH":
             assert json.loads(request.content)["content"] == "new body"
@@ -507,3 +531,59 @@ def test_local_restart_updates_origin_and_credentials_without_reopening_transpor
     with Holder(transport=transport) as h:
         assert h.projects.get("p-0").id == "p-0"
     assert transport.closed
+
+
+@pytest.mark.parametrize("query_kind", ["tag", "roots", "children"])
+def test_filtered_card_collections_follow_continuation(query_kind):
+    requests = []
+
+    def respond(request):
+        if request.url.path == "/projects/p-0":
+            return ok(project_payload())
+        if request.url.path == "/cards/c-0000":
+            return ok(card_payload(content=True))
+        assert request.url.path == "/projects/p-0/cards"
+        requests.append(request)
+        assert request.url.params["tag"] == "research"
+        if query_kind == "roots":
+            assert request.url.params["parent"] == "roots"
+        elif query_kind == "children":
+            assert request.url.params["parent"] == "c-0000"
+        cursor = request.url.params.get("cursor")
+        return ok(
+            {
+                "items": [card_payload(0 if cursor is None else 1)],
+                "next_cursor": "continuation" if cursor is None else None,
+            }
+        )
+
+    with holder_for(respond) as h:
+        project = h.projects.get("p-0")
+        query = project.cards
+        if query_kind == "roots":
+            query = query.roots()
+        elif query_kind == "children":
+            query = query.get("c-0000").children
+        assert [card.id for card in query.filter(tag="research")] == [
+            "c-0000",
+            "c-0001",
+        ]
+        assert len(requests) == 2
+        assert requests[1].url.params["cursor"] == "continuation"
+
+
+@pytest.mark.parametrize(
+    "items,cursor", [([], "more"), ([card_payload()], ""), ([card_payload()], "same")]
+)
+def test_invalid_card_continuation_is_rejected(items, cursor):
+    def respond(request):
+        if request.url.path == "/projects/p-0":
+            return ok(project_payload())
+        return ok({"items": items, "next_cursor": cursor})
+
+    with holder_for(respond) as h:
+        collection = h.projects.get("p-0").cards
+        if cursor == "same":
+            collection._next = "same"
+        with pytest.raises(ProtocolError, match="did not advance"):
+            list(collection)

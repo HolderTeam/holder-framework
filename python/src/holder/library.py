@@ -22,10 +22,10 @@ from .exceptions import (
 )
 from .generated import AuthenticatedClient
 from .generated.api.default import (
-    get_cards,
     get_cards_card_id,
     get_projects,
     get_projects_project_id,
+    get_projects_project_id_cards,
     patch_cards_card_id,
 )
 from .generated.models import (
@@ -34,7 +34,9 @@ from .generated.models import (
     ProjectPrivacyMode,
     ProjectSync,
 )
-from .generated.models.get_cards_view import GetCardsView
+from .generated.models.get_projects_project_id_cards_parent_type_0 import (
+    GetProjectsProjectIdCardsParentType0 as CardParent,
+)
 from .generated.types import UNSET, Unset
 
 T = TypeVar("T")
@@ -314,28 +316,29 @@ class CardCollection(Collection["Card"]):
     def filter(self, *, tag: str) -> Self:
         if not isinstance(tag, str) or not tag.strip():
             raise ValueError("tag must be a nonempty string")
-        if "view" in self._query:
-            raise ValueError("Tag queries cannot be combined with roots or children")
         return self._clone({**self._query, "tag": tag})
 
     def roots(self) -> Self:
-        if "tag" in self._query:
-            raise ValueError("Tag queries cannot be combined with roots or children")
-        return self._clone({"view": GetCardsView.TREE})
+        return self._clone({**self._query, "parent": CardParent.ROOTS})
 
     def _fetch_page(self) -> tuple[list[Card], str | None]:
-        query = dict(self._query)
-        paged = not query
-        if paged:
-            query.update(
-                view=GetCardsView.ALL, limit=200, after_card_id=self._next or UNSET
-            )
-        data = self._holder._call(get_cards, project_id=self._project.id, **query)
-        rows = [Card._from(self._project, item) for item in data]
+        data = self._holder._call(
+            get_projects_project_id_cards,
+            self._project.id,
+            limit=200,
+            cursor=self._next or UNSET,
+            **self._query,
+        )
+        rows = [Card._from(self._project, item) for item in data.items]
         if any(card.project_id != self._project.id for card in rows):
             raise ProtocolError("Card listing returned an object from another project")
-        cursor = rows[-1].id if paged and len(rows) == 200 else None
-        if cursor is not None and cursor == self._next:
+        cursor = data.next_cursor
+        if cursor is not None and (
+            not isinstance(cursor, str)
+            or not cursor
+            or not rows
+            or cursor == self._next
+        ):
             raise ProtocolError("Card pagination did not advance")
         return rows, cursor
 
@@ -417,9 +420,7 @@ class Card:
 
     @cached_property
     def children(self) -> CardCollection:
-        return CardCollection(
-            self._project, {"view": GetCardsView.TREE, "parent_card_id": self.id}
-        )
+        return CardCollection(self._project, {"parent": self.id})
 
     @classmethod
     def _from(cls, project: Project, data: Any) -> Self:

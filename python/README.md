@@ -44,8 +44,8 @@ with Holder() as h:
 Collections fetch lazily and cache results as you iterate. Use `.all()` for an
 independent query and `.refresh()` to discard cached results. Project filters are
 `name` (substring), `updated_after`, and `updated_before`; card queries support
-`.filter(tag="research")`, `.roots()`, and `card.children`. Tag queries cannot be
-combined with hierarchy queries. Cards are always scoped to a project.
+`.filter(tag="research")`, `.roots()`, and `card.children`. Tag filters combine
+with hierarchy queries. Cards are always scoped to a project.
 `get(id)` fetches directly; indexing accepts nonnegative integers.
 
 Card bodies load when you read `card.content`. Explicit `.update(title=...,

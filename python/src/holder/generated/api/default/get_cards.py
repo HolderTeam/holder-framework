@@ -17,7 +17,6 @@ def _get_kwargs(
     project_id: str,
     tag: str | Unset = UNSET,
     view: GetCardsView | Unset = GetCardsView.TREE,
-    after_card_id: str | Unset = UNSET,
     parent_card_id: str | Unset = UNSET,
     order: GetCardsOrder | Unset = UNSET,
     count: bool | Unset = False,
@@ -36,8 +35,6 @@ def _get_kwargs(
         json_view = view.value
 
     params["view"] = json_view
-
-    params["after_card_id"] = after_card_id
 
     params["parent_card_id"] = parent_card_id
 
@@ -105,7 +102,6 @@ def sync_detailed(
     project_id: str,
     tag: str | Unset = UNSET,
     view: GetCardsView | Unset = GetCardsView.TREE,
-    after_card_id: str | Unset = UNSET,
     parent_card_id: str | Unset = UNSET,
     order: GetCardsOrder | Unset = UNSET,
     count: bool | Unset = False,
@@ -118,7 +114,6 @@ def sync_detailed(
         project_id (str):
         tag (str | Unset):
         view (GetCardsView | Unset):  Default: GetCardsView.TREE.
-        after_card_id (str | Unset):
         parent_card_id (str | Unset):
         order (GetCardsOrder | Unset):
         count (bool | Unset):  Default: False.
@@ -137,7 +132,6 @@ def sync_detailed(
         project_id=project_id,
         tag=tag,
         view=view,
-        after_card_id=after_card_id,
         parent_card_id=parent_card_id,
         order=order,
         count=count,
@@ -158,7 +152,6 @@ def sync(
     project_id: str,
     tag: str | Unset = UNSET,
     view: GetCardsView | Unset = GetCardsView.TREE,
-    after_card_id: str | Unset = UNSET,
     parent_card_id: str | Unset = UNSET,
     order: GetCardsOrder | Unset = UNSET,
     count: bool | Unset = False,
@@ -171,7 +164,6 @@ def sync(
         project_id (str):
         tag (str | Unset):
         view (GetCardsView | Unset):  Default: GetCardsView.TREE.
-        after_card_id (str | Unset):
         parent_card_id (str | Unset):
         order (GetCardsOrder | Unset):
         count (bool | Unset):  Default: False.
@@ -191,7 +183,6 @@ def sync(
         project_id=project_id,
         tag=tag,
         view=view,
-        after_card_id=after_card_id,
         parent_card_id=parent_card_id,
         order=order,
         count=count,
@@ -206,7 +197,6 @@ async def asyncio_detailed(
     project_id: str,
     tag: str | Unset = UNSET,
     view: GetCardsView | Unset = GetCardsView.TREE,
-    after_card_id: str | Unset = UNSET,
     parent_card_id: str | Unset = UNSET,
     order: GetCardsOrder | Unset = UNSET,
     count: bool | Unset = False,
@@ -219,7 +209,6 @@ async def asyncio_detailed(
         project_id (str):
         tag (str | Unset):
         view (GetCardsView | Unset):  Default: GetCardsView.TREE.
-        after_card_id (str | Unset):
         parent_card_id (str | Unset):
         order (GetCardsOrder | Unset):
         count (bool | Unset):  Default: False.
@@ -238,7 +227,6 @@ async def asyncio_detailed(
         project_id=project_id,
         tag=tag,
         view=view,
-        after_card_id=after_card_id,
         parent_card_id=parent_card_id,
         order=order,
         count=count,
@@ -257,7 +245,6 @@ async def asyncio(
     project_id: str,
     tag: str | Unset = UNSET,
     view: GetCardsView | Unset = GetCardsView.TREE,
-    after_card_id: str | Unset = UNSET,
     parent_card_id: str | Unset = UNSET,
     order: GetCardsOrder | Unset = UNSET,
     count: bool | Unset = False,
@@ -270,7 +257,6 @@ async def asyncio(
         project_id (str):
         tag (str | Unset):
         view (GetCardsView | Unset):  Default: GetCardsView.TREE.
-        after_card_id (str | Unset):
         parent_card_id (str | Unset):
         order (GetCardsOrder | Unset):
         count (bool | Unset):  Default: False.
@@ -291,7 +277,6 @@ async def asyncio(
             project_id=project_id,
             tag=tag,
             view=view,
-            after_card_id=after_card_id,
             parent_card_id=parent_card_id,
             order=order,
             count=count,

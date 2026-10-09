@@ -102,21 +102,15 @@ def test_daemon_card_pages(daemon):
     _, _, raw, _ = daemon
     project = create_project(raw, "Pages")
     ids = sorted(create_card(raw, project, i) for i in range(3))
-    response = raw.get(
-        "/cards", params={"project_id": project, "view": "all", "limit": 2}
-    )
+    response = raw.get(f"/projects/{project}/cards", params={"limit": 2})
     assert response.status_code == 200
-    assert [card["card_id"] for card in response.json()["data"]] == ids[:2]
+    page = response.json()["data"]
+    assert [card["card_id"] for card in page["items"]] == ids[:2]
     response = raw.get(
-        "/cards",
-        params={
-            "project_id": project,
-            "view": "all",
-            "limit": 2,
-            "after_card_id": ids[1],
-        },
+        f"/projects/{project}/cards", params={"limit": 2, "cursor": page["next_cursor"]}
     )
-    assert [card["card_id"] for card in response.json()["data"]] == ids[2:]
+    assert [card["card_id"] for card in response.json()["data"]["items"]] == ids[2:]
+    assert response.json()["data"]["next_cursor"] is None
 
 
 def test_project_scoped_collections_against_daemon(daemon):
@@ -136,6 +130,8 @@ def test_project_scoped_collections_against_daemon(daemon):
         assert len(list(project.cards.roots())) == 204
         assert project.cards.get(ids[0]).children[0].id == child
         assert len(list(project.cards.filter(tag="research"))) == 205
+        assert len(list(project.cards.roots().filter(tag="research"))) == 204
+        assert project.cards.get(ids[0]).children.filter(tag="research")[0].id == child
         with pytest.raises(NotFoundError):
             project.cards.get(foreign)
         card = project.cards.get(ids[0])

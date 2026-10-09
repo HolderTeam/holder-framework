@@ -1,9 +1,8 @@
 from enum import StrEnum
 
 
-class GetCardsView(StrEnum):
-    RECENT = "recent"
-    TREE = "tree"
+class GetProjectsProjectIdCardsParentType0(StrEnum):
+    ROOTS = "roots"
 
     def __str__(self) -> str:
         return str(self.value)
