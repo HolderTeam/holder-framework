@@ -83,7 +83,10 @@ bool handle_project_card_routes(
     if (!parent.empty()) {
       if (parent != "roots" && !holder::identity::is_valid_uuid(parent))
         throw std::invalid_argument("parent must be roots or a card UUID.");
-      query.parent_card_id = parent == "roots" ? "" : parent;
+      if (parent == "roots")
+        query.parent = holder::card::CardPageRoots{};
+      else
+        query.parent = holder::card::CardPageChildrenOf{parent};
     }
     const auto order_raw = param_get("order");
     const auto order = order_raw.empty() ? "card_id_asc" : order_raw;
