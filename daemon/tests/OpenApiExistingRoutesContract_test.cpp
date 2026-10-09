@@ -617,16 +617,16 @@ TEST_CASE("OpenAPI contracts the goodbye hint", "[openapi][idle]") {
 }
 
 TEST_CASE(
-    "OpenAPI separates project card pages from the legacy display route",
+    "OpenAPI separates project card pages from the existing display route",
     "[openapi][card-pages]"
 ) {
   const auto document = load_openapi();
-  const auto legacy = document["paths"]["/cards"]["get"];
+  const auto display = document["paths"]["/cards"]["get"];
   CHECK(
-      parameter_named(legacy, "view")["schema"]["enum"].as<std::vector<std::string>>() ==
+      parameter_named(display, "view")["schema"]["enum"].as<std::vector<std::string>>() ==
       std::vector<std::string>{"tree", "recent"}
   );
-  for (const auto& param : legacy["parameters"])
+  for (const auto& param : display["parameters"])
     CHECK(param["name"].as<std::string>() != "after_card_id");
   const auto operation = document["paths"]["/projects/{project_id}/cards"]["get"];
   CHECK(parameter_named(operation, "project_id")["in"].as<std::string>() == "path");

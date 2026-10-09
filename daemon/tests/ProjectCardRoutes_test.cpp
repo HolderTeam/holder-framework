@@ -17,7 +17,7 @@ auto getter(Params params) {
 } // namespace
 
 TEST_CASE(
-    "Project card collection pages combine filters and preserve legacy cards",
+    "Project card collection pages combine filters and preserve display behaviour",
     "[card-pages]"
 ) {
   const auto dir = holder::test::make_temp_dir();
@@ -95,7 +95,7 @@ TEST_CASE(
   CHECK(call({}, "/projects/p/cards", http::verb::post).first == http::status::method_not_allowed);
 
   // The display endpoint retains its original hierarchy, recent mode and tag precedence.
-  auto legacy = [&](Params params) {
+  auto display = [&](Params params) {
     http::request<http::string_body> req{http::verb::get, "/cards", 11};
     http::response<http::string_body> res;
     params["project_id"] = "p";
@@ -113,12 +113,12 @@ TEST_CASE(
     ));
     return std::make_pair(res.result(), nlohmann::json::parse(res.body()));
   };
-  CHECK(legacy({}).second["data"].size() == 1);
-  CHECK(legacy({{"parent_card_id", first}}).second["data"].size() == 2);
-  CHECK(legacy({{"tag", "work"}, {"parent_card_id", first}}).second["data"].size() == 3);
-  CHECK(legacy({{"view", "recent"}, {"limit", "2junk"}}).second["data"].size() == 2);
-  CHECK(legacy({{"view", "all"}}).first == http::status::bad_request);
-  CHECK(legacy({{"after_card_id", third}}).second["data"].size() == 1);
+  CHECK(display({}).second["data"].size() == 1);
+  CHECK(display({{"parent_card_id", first}}).second["data"].size() == 2);
+  CHECK(display({{"tag", "work"}, {"parent_card_id", first}}).second["data"].size() == 3);
+  CHECK(display({{"view", "recent"}, {"limit", "2junk"}}).second["data"].size() == 2);
+  CHECK(display({{"view", "all"}}).first == http::status::bad_request);
+  CHECK(display({{"after_card_id", third}}).second["data"].size() == 1);
 }
 
 TEST_CASE("Project card routes decline unrelated paths", "[card-pages]") {
