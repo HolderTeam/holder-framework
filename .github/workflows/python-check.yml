@@ -33,6 +33,6 @@ jobs:
           python-version: ${{ matrix.python }}
       - run: python -m pip install -e '.[dev]'
       - run: python scripts/generate.py --check --source ../api/openapi.yaml
-      - run: ruff check scripts tests src/holder/events.py
+      - run: ruff check scripts tests src/holder --exclude src/holder/generated
       - run: python -m pytest
       - run: python -m build

@@ -10,6 +10,7 @@ on:
       - 'cli/**'
       - 'common/**'
       - 'api/**'
+      - 'python/**'
   push:
     branches: [main]
     paths:
@@ -20,6 +21,7 @@ on:
       - 'cli/**'
       - 'common/**'
       - 'api/**'
+      - 'python/**'
   workflow_dispatch:
     inputs:
       core_ref:
