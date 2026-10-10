@@ -315,7 +315,7 @@ def mock_cli(monkeypatch, result=None):
             ),
         )
     )
-    monkeypatch.setattr("holder.library.subprocess.run", runner)
+    monkeypatch.setattr("holder.client.subprocess.run", runner)
     return runner
 
 
@@ -393,7 +393,7 @@ def test_discovery_errors_do_not_expose_credentials(monkeypatch, failure_mode):
             "secret-token",
         )
 
-    monkeypatch.setattr("holder.library.subprocess.run", run)
+    monkeypatch.setattr("holder.client.subprocess.run", run)
     with pytest.raises(ConnectionError) as caught, Holder():
         pass
     assert "secret-token" not in str(caught.value)
@@ -510,7 +510,7 @@ def test_local_restart_updates_origin_and_credentials_without_reopening_transpor
             command, 0, value if isinstance(value, str) else json.dumps(value)
         )
 
-    monkeypatch.setattr("holder.library.subprocess.run", run)
+    monkeypatch.setattr("holder.client.subprocess.run", run)
 
     class Transport(httpx.MockTransport):
         closed = False
