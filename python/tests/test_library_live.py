@@ -133,6 +133,49 @@ def test_create_read_edit_workflow_against_daemon(daemon):
         assert len(list(project.cards.roots())) == 2
 
 
+def test_tag_collections_and_body_mentions_against_daemon(daemon):
+    url, token, _, _ = daemon
+    with Holder(url=url, token=token) as h:
+        project = h.projects.create(name="Python tags", privacy_mode="plain")
+        other = h.projects.create(name="Other tags", privacy_mode="plain")
+        card = project.cards.create(
+            title="Tagged card", content="An inline #body mention.\n\n#draft"
+        )
+        sibling = project.cards.create(title="Related", content="Related notes")
+        foreign = other.cards.create(title="Foreign", content="Foreign notes")
+        assert {t.name for t in card.tags} == {"body", "draft"}
+        assert {t.name for t in project.tags} == {"body", "draft"}
+        cached_project_tags = project.tags
+        card.tags.add("Research")
+        sibling.tags.add("RESEARCH")
+        foreign.tags.add("research")
+        assert {t.name for t in card.tags} == {"body", "draft", "research"}
+        assert "#research" in card.content
+        assert {t.name for t in cached_project_tags} == {"body", "draft"}
+        tag = project.tags.get("research")
+        assert tag.card_count == 2
+        assert tag.project_id == project.id
+        assert {c.id for c in tag.cards} == {card.id, sibling.id}
+        assert project.tags.refresh()[0].name == "research"
+        assert {c.id for c in card.tags.get("research").cards} == {card.id, sibling.id}
+        before = card.content
+        card.tags.add("research")
+        assert card.content == before
+        card.tags.remove("DRAFT")
+        assert {t.name for t in card.tags} == {"body", "research"}
+        card.tags.remove("missing")
+        before = card.content
+        card.tags.remove("body")
+        assert card.content == before
+        assert {t.name for t in card.tags} == {"body", "research"}
+        card.tags.remove("research")
+        assert [t.name for t in card.tags] == ["body"]
+        assert tag.refresh().card_count == 1
+        assert {c.id for c in tag.cards.refresh()} == {sibling.id}
+        card.update(content="The user removed the inline mention.")
+        assert list(card.tags) == []
+
+
 def test_daemon_card_pages(daemon):
     _, _, raw, _ = daemon
     project = create_project(raw, "Pages")

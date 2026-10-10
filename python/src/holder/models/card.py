@@ -20,6 +20,7 @@ from ..generated.models.get_projects_project_id_cards_parent_type_0 import (
     GetProjectsProjectIdCardsParentType0 as CardParent,
 )
 from ..generated.types import UNSET, Unset
+from .tag import CardTagCollection
 
 if TYPE_CHECKING:
     from .project import Project
@@ -127,6 +128,10 @@ class Card:
     def children(self) -> CardCollection:
         return CardCollection(self._project, {"parent": self.id})
 
+    @cached_property
+    def tags(self) -> CardTagCollection:
+        return CardTagCollection(self)
+
     @classmethod
     def _from(cls, project: Project, data: Any) -> Self:
         values: dict[str, Any] = {
@@ -142,6 +147,8 @@ class Card:
         for f in fields(self):
             if f.name != "_project":
                 object.__setattr__(self, f.name, getattr(fresh, f.name))
+        if "tags" in self.__dict__:
+            self.tags.refresh()
         return self
 
     def update(
