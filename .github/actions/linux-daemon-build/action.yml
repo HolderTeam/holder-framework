@@ -28,6 +28,29 @@ runs:
 
     - uses: ./.github/actions/linux-daemon-deps
 
+    - name: Install and configure ccache
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get install -y --no-install-recommends ccache
+        {
+          echo "CCACHE_DIR=${GITHUB_WORKSPACE}/.ccache"
+          echo "CCACHE_BASEDIR=${GITHUB_WORKSPACE}"
+          echo "CCACHE_NOHASHDIR=true"
+          echo "CCACHE_COMPILERCHECK=content"
+          echo "CCACHE_MAXSIZE=500M"
+        } >> "$GITHUB_ENV"
+
+    # Pull requests restore the compiler cache that main saves, as with vcpkg's binary cache.
+    - name: Restore compiler cache
+      uses: actions/cache/restore@v4
+      with:
+        path: .ccache
+        key: ccache-${{ runner.os }}-${{ inputs.build-type }}-${{ inputs.build-testing }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: |
+          ccache-${{ runner.os }}-${{ inputs.build-type }}-${{ inputs.build-testing }}-
+          ccache-${{ runner.os }}-${{ inputs.build-type }}-
+
     - name: Configure CMake
       shell: bash
       working-directory: daemon
@@ -40,6 +63,8 @@ runs:
           -G Ninja \
           -DCMAKE_BUILD_TYPE="$HOLDER_CORE_BUILD_TYPE" \
           -DCMAKE_INSTALL_PREFIX=/usr \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           -DBUILD_TESTING="$BUILD_TESTING"
 
     - name: Build backend executables
@@ -47,9 +72,22 @@ runs:
       working-directory: daemon
       run: |
         # Core is prebuilt; this builds daemon executables and, when enabled, integration tests.
+        ccache --zero-stats
         cmake \
           --build build-linux \
           --parallel
+
+    - name: Show compiler cache statistics
+      if: always()
+      shell: bash
+      run: ccache --show-stats --verbose
+
+    - name: Save compiler cache
+      if: github.event_name != 'pull_request'
+      uses: actions/cache/save@v4
+      with:
+        path: .ccache
+        key: ccache-${{ runner.os }}-${{ inputs.build-type }}-${{ inputs.build-testing }}-${{ github.run_id }}-${{ github.run_attempt }}
 
     - name: Stage installed backend
       shell: bash

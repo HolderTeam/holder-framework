@@ -66,10 +66,37 @@ jobs:
           & "$env:VCPKG_ROOT\bootstrap-vcpkg.bat" -disableMetrics
           New-Item -ItemType Directory -Force "$env:VCPKG_DEFAULT_BINARY_CACHE" | Out-Null
 
+      - name: Install and configure ccache
+        shell: pwsh
+        run: |
+          choco install ccache --no-progress -y
+          "CCACHE_DIR=${{ github.workspace }}\.ccache" >> $env:GITHUB_ENV
+          "CCACHE_BASEDIR=${{ github.workspace }}" >> $env:GITHUB_ENV
+          "CCACHE_NOHASHDIR=true" >> $env:GITHUB_ENV
+          "CCACHE_COMPILERCHECK=content" >> $env:GITHUB_ENV
+          "CCACHE_MAXSIZE=500M" >> $env:GITHUB_ENV
+
+      # Pull requests restore the compiler cache that main saves, as with vcpkg's binary cache.
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ inputs.build_type }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ inputs.build_type }}-
+
+      # ccache cannot cache objects whose debug information goes to a shared PDB (/Zi), so CI
+      # embeds it in each object instead (/Z7). The linker still writes the executables' PDBs.
       - name: Configure CMake
         shell: pwsh
         working-directory: daemon
-        run: cmake --preset windows-sdk-tests "-DCMAKE_BUILD_TYPE=$env:HOLDER_CORE_BUILD_TYPE"
+        run: >-
+          cmake --preset windows-sdk-tests
+          "-DCMAKE_BUILD_TYPE=$env:HOLDER_CORE_BUILD_TYPE"
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
+          -DCMAKE_POLICY_DEFAULT_CMP0141=NEW
+          -DCMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded
 
       - name: Save vcpkg binary package cache
         if: success() && github.event_name != 'pull_request'
@@ -80,7 +107,20 @@ jobs:
 
       - name: Build backend executables and tests
         working-directory: daemon
-        run: cmake --build --preset windows-sdk-tests --parallel
+        run: |
+          ccache --zero-stats
+          cmake --build --preset windows-sdk-tests --parallel
+
+      - name: Show compiler cache statistics
+        if: always()
+        run: ccache --show-stats --verbose
+
+      - name: Save compiler cache
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ inputs.build_type }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Run tests
         working-directory: daemon
