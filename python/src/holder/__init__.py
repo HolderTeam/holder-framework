@@ -1,5 +1,6 @@
 """Holder Python Library - control your knowledge using Python."""
 
-from .library import Card, Holder, Project
+from .client import Holder
+from .models import Card, Project
 
 __all__ = ["Card", "Holder", "Project"]
