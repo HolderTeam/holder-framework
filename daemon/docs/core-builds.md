@@ -67,4 +67,9 @@ commit, version and API version. Record the CI run and component commits in the
 framework release manifest.
 
 Ubuntu source packages use `libholder-dev` and its shared `libholder0` runtime
-through `HOLDER_USE_SYSTEM_CORE=ON`. CI checks these packages separately.
+through `HOLDER_USE_SYSTEM_CORE=ON`. CI checks these packages separately: it
+builds `libholder0` and `libholder-dev` from the resolved core commit, then
+builds and installs the daemon package against them, so a daemon change that
+needs new core does not wait for Launchpad. Before a release, run Daemon CI
+manually with `core_packages=ppa` to build against the published Launchpad
+packages instead.
