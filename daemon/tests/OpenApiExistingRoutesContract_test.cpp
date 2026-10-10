@@ -615,3 +615,29 @@ TEST_CASE("OpenAPI contracts the goodbye hint", "[openapi][idle]") {
   require_json_response_ref(bye, "401", "ErrorResponse");
   REQUIRE_FALSE(bye["requestBody"].IsDefined());
 }
+
+TEST_CASE(
+    "OpenAPI separates project card pages from the existing display route",
+    "[openapi][card-pages]"
+) {
+  const auto document = load_openapi();
+  const auto display = document["paths"]["/cards"]["get"];
+  CHECK(
+      parameter_named(display, "view")["schema"]["enum"].as<std::vector<std::string>>() ==
+      std::vector<std::string>{"tree", "recent"}
+  );
+  for (const auto& param : display["parameters"])
+    CHECK(param["name"].as<std::string>() != "after_card_id");
+  const auto operation = document["paths"]["/projects/{project_id}/cards"]["get"];
+  CHECK(parameter_named(operation, "project_id")["in"].as<std::string>() == "path");
+  CHECK(parameter_named(operation, "project_id")["required"].as<bool>());
+  CHECK(parameter_named(operation, "limit")["schema"]["maximum"].as<int>() == 5000);
+  CHECK(parameter_named(operation, "parent")["schema"]["oneOf"].size() == 2);
+  for (const auto& param : operation["parameters"])
+    CHECK(param["name"].as<std::string>() != "include_deleted");
+  require_json_response_ref(operation, "200", "CardPageResponse");
+  CHECK(
+      required_properties(document["components"]["schemas"]["CardPage"]) ==
+      std::vector<std::string>{"items", "next_cursor"}
+  );
+}
