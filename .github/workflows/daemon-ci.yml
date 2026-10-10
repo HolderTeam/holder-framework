@@ -151,16 +151,19 @@ jobs:
       # ppa choice builds against the published Launchpad packages instead, as users install them.
       CORE_PACKAGES: ${{ inputs.core_packages || 'source' }}
     steps:
-      - name: Install packaging tools
+      - name: Install packaging tools and configure package source
         env:
           DEBIAN_FRONTEND: noninteractive
         run: |
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates software-properties-common git devscripts equivs debhelper cmake ninja-build
-      - name: Use the Launchpad core packages
-        if: env.CORE_PACKAGES == 'ppa'
-        run: |
+          # The PPA also provides daemon build dependencies that Ubuntu does not, such as libcaste-dev.
           add-apt-repository -y ppa:holderteam/holder
+          if [ "$CORE_PACKAGES" = source ]; then
+            # Only the core packages built below may satisfy libholder.
+            printf 'Package: libholder0 libholder-dev\nPin: release o=LP-PPA-holderteam-holder\nPin-Priority: -1\n' \
+              > /etc/apt/preferences.d/no-ppa-libholder
+          fi
           apt-get update
       - uses: actions/checkout@v4
         with:
