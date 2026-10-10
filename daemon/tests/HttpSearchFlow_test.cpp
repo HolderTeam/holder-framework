@@ -54,7 +54,7 @@ TEST_CASE("HTTP search flow finds card and opens it", "[http]") {
   nlohmann::json card_body = {
       {"project_id", project_id},
       {"title", "Searchable Card"},
-      {"content", "unique search term"}
+      {"content", "unique search term café"}
   };
 
   const auto created_card = http_json_request(
@@ -102,6 +102,20 @@ TEST_CASE("HTTP search flow finds card and opens it", "[http]") {
   }
   REQUIRE(found);
 
+  for (const auto& encoded_query : {"unique+search", "%22unique%20search%22", "caf%C3%A9"}) {
+    const auto encoded_search = http_json_request(
+        bound.bind,
+        bound.port,
+        token,
+        boost::beast::http::verb::get,
+        "/search/cards?project_id=" + project_id + "&q=" + encoded_query,
+        nlohmann::json::object(),
+        boost::beast::http::status::ok
+    );
+    REQUIRE(encoded_search["data"].size() == 1);
+    REQUIRE(encoded_search["data"][0]["card_id"] == card_id);
+  }
+
   const auto fetched = http_json_request(
       bound.bind,
       bound.port,
@@ -112,7 +126,7 @@ TEST_CASE("HTTP search flow finds card and opens it", "[http]") {
       boost::beast::http::status::ok
   );
   REQUIRE(fetched["data"]["title"] == "Searchable Card");
-  REQUIRE(fetched["data"]["content"] == "unique search term");
+  REQUIRE(fetched["data"]["content"] == "unique search term café");
 
   server_thread.stop();
 }

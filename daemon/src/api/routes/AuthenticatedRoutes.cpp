@@ -69,7 +69,7 @@ AuthenticatedDispatchResult dispatch_authenticated_routes(
   } else if (resource == "reindex") {
     if (handle_reindex_routes(path, req, res, db)) return {};
   } else if (resource == "search") {
-    if (handle_search_routes(path, req, res, fts, param)) return {};
+    if (handle_search_routes(path, req, res, fts, decoded_param)) return {};
   } else if (resource == "ai") {
     const auto route_result = ai::dispatch_ai_routes(
         path,
