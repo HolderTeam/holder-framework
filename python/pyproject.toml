@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "holder-python"
 version = "0.1.0"
-description = "Low-level Python HTTP client for a running Holder daemon"
+description = "Control your knowledge using Python"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["httpx>=0.23.1,<0.29", "attrs>=22.2", "typing-extensions>=4.5"]

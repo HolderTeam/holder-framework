@@ -1,11 +1,11 @@
 # holder-python
 
-Experimental Python HTTP client for a running `holder-daemon`. This is separate
+Control your knowledge using Python. This is separate
 from `holder-kit`, which provides native bindings for offline analysis.
 
 This first iteration evaluates
 [openapi-python-client](https://github.com/openapi-generators/openapi-python-client).
-There is no high-level API yet. The generator is a development dependency;
+The generator is a development dependency;
 installed clients only need HTTPX, attrs and typing-extensions.
 
 ## Setup
@@ -22,7 +22,40 @@ python scripts/generate.py --check
 python -m build
 ```
 
-## Try the low-level client
+## Use Holder
+
+`Holder()` discovers or starts your local daemon using `holderctl` on PATH.
+Supply `url` and `token` together to connect explicitly instead.
+
+```python
+from holder import Holder
+
+with Holder() as h:
+    for project in h:  # also h.projects
+        print(project.name)
+        for card in project.cards:
+            print(card.title)
+
+    project = h.projects.filter(name="Research")[0]
+    card = project.cards.get(card_id)
+    card.update(title="A better title")
+```
+
+Collections fetch lazily and cache results as you iterate. Use `.all()` for an
+independent query and `.refresh()` to discard cached results. Project filters are
+`name` (substring), `updated_after`, and `updated_before`; card queries support
+`.filter(tag="research")`, `.roots()`, and `card.children`. Tag filters combine
+with hierarchy queries. Card iteration excludes trashed cards. Cards are always
+scoped to a project.
+`get(id)` fetches directly; indexing accepts nonnegative integers.
+
+Card bodies load when you read `card.content`. Explicit `.update(title=...,
+content=...)` writes; attribute assignment does not. Both objects support
+`.refresh()`. Iteration observes live data rather than a frozen snapshot, and its
+cache grows with visited results. Context exit closes the client without stopping
+the daemon. Failures raise exceptions from `holder.exceptions`.
+
+## Use the low-level client
 
 Supply the daemon URL and bearer token explicitly. This experiment does not
 discover daemon connection details or read credentials from the machine.
