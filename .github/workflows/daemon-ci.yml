@@ -11,6 +11,8 @@ on:
       - 'VERSION'
       - '.gitmodules'
       - '.github/workflows/daemon-*.yml'
+      - '.github/actions/linux-daemon-*/**'
+      - '.github/scripts/linux-daemon-cache-key.sh'
       - 'cli/**'
       - 'common/**'
       - 'api/**'
@@ -66,7 +68,7 @@ jobs:
           # The pull request merge commit's parents are the base and the pull request head.
           changed=$(git diff --name-only HEAD^1...HEAD^2)
           printf '%s\n' "$changed"
-          if grep -qE '^(daemon/|cli/|common/|api/|VERSION$|\.gitmodules$|\.github/workflows/daemon-)' <<< "$changed"; then
+          if grep -qE '^(daemon/|cli/|common/|api/|VERSION$|\.gitmodules$|\.github/workflows/daemon-|\.github/actions/linux-daemon-|\.github/scripts/linux-daemon-cache-key\.sh$)' <<< "$changed"; then
             echo "daemon=true" >> "$GITHUB_OUTPUT"
           else
             echo "daemon=false" >> "$GITHUB_OUTPUT"
