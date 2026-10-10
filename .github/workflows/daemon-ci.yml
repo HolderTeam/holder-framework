@@ -59,7 +59,7 @@ jobs:
       SCOPED: ${{ github.event_name == 'pull_request' && github.repository == 'HolderTeam/holder-framework' }}
     steps:
       - if: env.SCOPED == 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -86,7 +86,7 @@ jobs:
       core_commit: ${{ steps.core.outputs.commit }}
       daemon_commit: ${{ steps.source.outputs.commit }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: HolderTeam/holder-framework
           ref: ${{ github.repository == 'HolderTeam/holder-framework' && github.sha || inputs.daemon_ref || 'main' }}
@@ -165,13 +165,13 @@ jobs:
               > /etc/apt/preferences.d/no-ppa-libholder
           fi
           apt-get update
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           repository: HolderTeam/holder-framework
           ref: ${{ needs.resolve.outputs.daemon_commit }}
           persist-credentials: false
       - if: env.CORE_PACKAGES == 'source'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: HolderTeam/holder-core
           ref: ${{ needs.resolve.outputs.core_commit }}
