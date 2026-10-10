@@ -1,11 +1,9 @@
 name: Python / Check
 
 on:
+  # Pull requests always start this workflow so that its required result check is reported;
+  # the changes job decides whether the checks run. Keep its pattern in step with these paths.
   pull_request:
-    paths:
-      - 'python/**'
-      - 'api/openapi.yaml'
-      - '.github/workflows/python-check.yml'
   push:
     branches: [main]
     paths:
@@ -18,7 +16,36 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      python: ${{ steps.select.outputs.python }}
+    steps:
+      - if: github.event_name == 'pull_request'
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: select
+        name: Select jobs from the changed paths
+        env:
+          EVENT: ${{ github.event_name }}
+        run: |
+          if [[ "$EVENT" != pull_request ]]; then
+            echo "python=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The pull request merge commit's parents are the base and the pull request head.
+          changed=$(git diff --name-only HEAD^1...HEAD^2)
+          printf '%s\n' "$changed"
+          if grep -qE '^(python/|api/openapi\.yaml$|\.github/workflows/python-check\.yml$)' <<< "$changed"; then
+            echo "python=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "python=false" >> "$GITHUB_OUTPUT"
+          fi
   check:
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -36,3 +63,20 @@ jobs:
       - run: ruff check scripts tests src/holder --exclude src/holder/generated
       - run: python -m pytest
       - run: python -m build
+  result:
+    name: Python check result
+    # The required check. It runs even when jobs fail or are skipped, and passes only when the
+    # checks succeeded or were rightly skipped.
+    if: always()
+    needs: [changes, check]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check job results
+        env:
+          SELECTED: ${{ needs.changes.outputs.python }}
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$RESULTS"
+          jq -e --arg selected "$SELECTED" '
+            .changes.result == "success" and
+            .check.result == (if $selected == "true" then "success" else "skipped" end)' <<< "$RESULTS" > /dev/null
