@@ -960,7 +960,7 @@ components:
         parent_card_id:
           type: string
           nullable: true
-          description: Optional parent scope for intents to_start/to_end/left/right. If omitted, source card's current parent scope is used.
+          description: Destination parent scope for intents to_start/to_end/left/right. If omitted, source card's current parent scope is used. An explicit null is the project's top level.
         if_revision:
           type: integer
           format: int64

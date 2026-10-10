@@ -77,13 +77,14 @@ Move cards using exactly one target:
 
 ```python
 card.move(parent=another_card)  # append as a child
+card.move(parent=None)  # append at the project's top level
 card.move(before=sibling)
 card.move(after=sibling)
 ```
 
 Relative moves adopt the target's parent, including when the target is a root.
 The daemon enforces hierarchy and project rules. Moves refresh the card; refresh
-previously evaluated listings explicitly. `parent=None` is not supported yet.
+previously evaluated listings explicitly.
 
 Search returns lazy, relevance-ordered results with matching snippets:
 

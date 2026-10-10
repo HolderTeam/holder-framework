@@ -20,8 +20,8 @@ class CardMoveRequest:
         project_id (str):
         intent (CardMoveIntent):
         target_card_id (None | str | Unset): Required for intents into/before/after.
-        parent_card_id (None | str | Unset): Optional parent scope for intents to_start/to_end/left/right. If omitted,
-            source card's current parent scope is used.
+        parent_card_id (None | str | Unset): Destination parent scope for intents to_start/to_end/left/right. If
+            omitted, source card's current parent scope is used. An explicit null is the project's top level.
         if_revision (int | None | Unset): Optional optimistic-concurrency revision guard.
     """
 

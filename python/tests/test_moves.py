@@ -81,6 +81,46 @@ def test_move_maps_intent_and_refreshes_card(argument, intent):
         card.move(parent=target)
 
 
+def test_move_to_top_level_sends_explicit_null_parent_and_refreshes_card():
+    requests = []
+    changed = False
+
+    def respond(request):
+        nonlocal changed
+        requests.append(request)
+        if request.method == "POST":
+            assert request.url.path == "/cards/c-0000/move"
+            assert json.loads(request.content) == {
+                "project_id": "p-0",
+                "intent": "to_end",
+                "parent_card_id": None,
+            }
+            changed = True
+            return ok(
+                {
+                    "card_id": "c-0000",
+                    "parent_card_id": None,
+                    "sort_key": 42,
+                    "revision": 10,
+                }
+            )
+        if request.url.path == "/projects/p-0":
+            return ok(project_payload())
+        data = card_payload(content=True)
+        data.update(parent_card_id=None if changed else "c-0001")
+        if changed:
+            data.update(sort_key=42, updated_at=10)
+        return ok(data)
+
+    with holder_for(respond) as h:
+        card = h.projects.get("p-0").cards.get("c-0000")
+        assert card.parent_card_id == "c-0001"
+        assert card.move(parent=None) is card
+        assert card.parent_card_id is None
+        assert card.sort_key == 42
+        assert [r.method for r in requests[-2:]] == ["POST", "GET"]
+
+
 def test_move_argument_validation_does_not_write():
     def respond(request):
         assert request.method == "GET"
@@ -94,7 +134,7 @@ def test_move_argument_validation_does_not_write():
             {},
             {"parent": card, "before": card},
             {"before": card, "after": card},
-            {"parent": None},
+            {"parent": None, "before": card},
             {"before": "c-0000"},
             {"after": 1},
         ):
