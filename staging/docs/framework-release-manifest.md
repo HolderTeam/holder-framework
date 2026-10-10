@@ -10,7 +10,7 @@ validate this machinery. It is a test candidate, not a production release;
 its component inputs remain subject to Actions artifact retention.
 
 1. Select one published core commit and record its full SHA.
-2. Dispatch daemon `ci.yml` with that `core_ref` and `core_build_type=Release`.
+2. Dispatch `daemon-ci.yml` with that `core_ref` and `core_build_type=Release`.
 3. Dispatch the desktop artifact workflows with `build_type=release`.
 4. After the selected runs pass, record their run IDs and source commits below.
 5. Commit the manifest and run staging with its relative path. Leave core/run

@@ -70,7 +70,7 @@ still running. Retry after that check passes; it does not silently use older cor
 
 Run IDs, repositories, branches, `core_ref` (tag or full SHA), and the AppImage
 version can be overridden for compatibility testing. Set `backend_repository`
-to `HolderTeam/holder-daemon` to select artifacts from daemon's `ci.yml` instead.
+to `HolderTeam/holder-framework` to select artifacts from its own `daemon-ci.yml` instead.
 An explicit older core selection needs a backend run built against that revision.
 
 For an RC or release, commit a JSON manifest to this repository and supply its

@@ -30,6 +30,11 @@ def resolve(repository, workflow, branch, artifact, provided="", request=api):
     raise ValueError(f"No successful {repository}@{branch} run has an unexpired {artifact} artifact")
 
 
+def backend_workflow(repository):
+    """Core publishes backends from its integration run; holder-framework from its own CI."""
+    return "daemon-integration.yml" if repository == "HolderTeam/holder-core" else "daemon-ci.yml"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--platform", choices=("windows", "macos"), required=True)
@@ -41,7 +46,7 @@ def main():
             repository = os.environ[component.upper() + "_REPOSITORY"]
             workflow = f"{suffix}-{component}.yml"
             if component == "backend":
-                workflow = "daemon-integration.yml" if repository == "HolderTeam/holder-core" else "ci.yml"
+                workflow = backend_workflow(repository)
                 artifact = f"holder-daemon-{suffix}-backend"
                 if args.build_type == "Release":
                     artifact += "-release"
