@@ -1,15 +1,9 @@
 name: Daemon / CI
 
 on:
+  # Pull requests always start this workflow so that its required result check is reported;
+  # the changes job decides whether the daemon jobs run. Keep its pattern in step with these paths.
   pull_request:
-    paths:
-      - 'daemon/**'
-      - 'VERSION'
-      - '.gitmodules'
-      - '.github/workflows/daemon-*.yml'
-      - 'cli/**'
-      - 'common/**'
-      - 'api/**'
   push:
     branches: [main]
     paths:
@@ -49,7 +43,37 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      daemon: ${{ steps.select.outputs.daemon }}
+    env:
+      # holder-core calls this workflow from its own pull requests; those build everything.
+      SCOPED: ${{ github.event_name == 'pull_request' && github.repository == 'HolderTeam/holder-framework' }}
+    steps:
+      - if: env.SCOPED == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: select
+        name: Select jobs from the changed paths
+        run: |
+          if [[ "$SCOPED" != true ]]; then
+            echo "daemon=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # The pull request merge commit's parents are the base and the pull request head.
+          changed=$(git diff --name-only HEAD^1...HEAD^2)
+          printf '%s\n' "$changed"
+          if grep -qE '^(daemon/|cli/|common/|api/|VERSION$|\.gitmodules$|\.github/workflows/daemon-)' <<< "$changed"; then
+            echo "daemon=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "daemon=false" >> "$GITHUB_OUTPUT"
+          fi
   resolve:
+    needs: changes
+    if: needs.changes.outputs.daemon == 'true'
     runs-on: ubuntu-24.04
     outputs:
       core_commit: ${{ steps.core.outputs.commit }}
@@ -161,3 +185,25 @@ jobs:
           name: holder-daemon-${{ matrix.series }}-packages
           path: ${{ env.EXPORTED_DAEMON }}/out/ubuntu-packages/*.deb
           if-no-files-found: error
+  result:
+    name: Daemon CI result
+    # The required check. It runs even when jobs fail or are skipped, and passes only when every
+    # selected job succeeded and no job ran that was not selected.
+    if: always()
+    needs: [changes, resolve, linux, macos, windows, ubuntu-packages]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check job results
+        env:
+          SELECTED: ${{ needs.changes.outputs.daemon }}
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$RESULTS"
+          jq -e --arg selected "$SELECTED" '
+            .changes.result == "success" and
+            (if $selected == "true" then
+               ([.resolve, .linux, .macos, .windows] | all(.result == "success")) and
+               (.["ubuntu-packages"].result | IN("success", "skipped"))
+             else
+               ([.resolve, .linux, .macos, .windows, .["ubuntu-packages"]] | all(.result == "skipped"))
+             end)' <<< "$RESULTS" > /dev/null
