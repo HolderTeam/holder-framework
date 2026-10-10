@@ -26,6 +26,11 @@ on:
         type: choice
         options: [RelWithDebInfo, Release]
         default: RelWithDebInfo
+      core_packages:
+        description: Core packages for the Ubuntu package build (ppa checks a release candidate against Launchpad)
+        type: choice
+        options: [source, ppa]
+        default: source
   workflow_call:
     inputs:
       core_ref:
@@ -141,6 +146,10 @@ jobs:
       # The package is built from daemon/ copied out on its own, as the Debian source package is,
       # so a file the build reads from beside daemon/ shows up here instead of on Launchpad.
       EXPORTED_DAEMON: /tmp/export/daemon
+      # By default libholder packages are built here from the resolved core commit, the same core
+      # the other jobs use, so a daemon change needing new core does not wait on Launchpad. The
+      # ppa choice builds against the published Launchpad packages instead, as users install them.
+      CORE_PACKAGES: ${{ inputs.core_packages || 'source' }}
     steps:
       - name: Install packaging tools and configure package source
         env:
@@ -148,19 +157,56 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates software-properties-common git devscripts equivs debhelper cmake ninja-build
+          # The PPA also provides daemon build dependencies that Ubuntu does not, such as libcaste-dev.
           add-apt-repository -y ppa:holderteam/holder
+          if [ "$CORE_PACKAGES" = source ]; then
+            # Only the core packages built below may satisfy libholder.
+            printf 'Package: libholder0 libholder-dev\nPin: release o=LP-PPA-holderteam-holder\nPin-Priority: -1\n' \
+              > /etc/apt/preferences.d/no-ppa-libholder
+          fi
           apt-get update
       - uses: actions/checkout@v4
         with:
           repository: HolderTeam/holder-framework
           ref: ${{ needs.resolve.outputs.daemon_commit }}
           persist-credentials: false
+      - if: env.CORE_PACKAGES == 'source'
+        uses: actions/checkout@v4
+        with:
+          repository: HolderTeam/holder-core
+          ref: ${{ needs.resolve.outputs.core_commit }}
+          path: core-source
+          persist-credentials: false
+      - name: Build and install core packages from the resolved core commit
+        if: env.CORE_PACKAGES == 'source'
+        shell: bash
+        env:
+          DEBIAN_FRONTEND: noninteractive
+          SERIES: ${{ matrix.series }}
+          CORE_COMMIT: ${{ needs.resolve.outputs.core_commit }}
+        working-directory: core-source
+        run: |
+          set -euo pipefail
+          version="$(tr -d '[:space:]' < VERSION)"
+          cp -a packaging/linux/debian debian
+          # Version the packages from VERSION as the Launchpad upload does, so the daemon's
+          # libholder-dev requirement is checked against the core being built.
+          cat > debian/changelog <<EOF
+          holder-core (${version}-1~${SERIES}1) ${SERIES}; urgency=medium
+
+            * Build libholder packages from core ${CORE_COMMIT}.
+
+           -- Holder Team <holdercardteam@gmail.com>  $(date -R)
+          EOF
+          mk-build-deps --install --remove --tool 'apt-get -y --no-install-recommends' debian/control
+          dpkg-buildpackage -b -us -uc -j2
+          apt-get install -y --no-install-recommends ../libholder0_*.deb ../libholder-dev_*.deb
       - name: Export daemon/ on its own, as the Debian source package sees it
         run: |
           mkdir -p "$(dirname "${EXPORTED_DAEMON}")"
           cp -a daemon "${EXPORTED_DAEMON}"
           daemon/packaging/linux/prepare-source-tree.sh "${GITHUB_WORKSPACE}" "${EXPORTED_DAEMON}"
-      - name: Build daemon with distribution core packages
+      - name: Build daemon against the installed core packages
         env:
           DEBIAN_FRONTEND: noninteractive
         working-directory: ${{ env.EXPORTED_DAEMON }}

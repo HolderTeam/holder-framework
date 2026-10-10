@@ -84,7 +84,7 @@ jobs:
 
       - name: Run tests
         working-directory: daemon
-        run: ctest --preset windows-sdk-tests
+        run: ctest --preset windows-sdk-tests --parallel 8
 
       - name: Stage backend artifact
         shell: pwsh
