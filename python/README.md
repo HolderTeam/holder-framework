@@ -57,6 +57,22 @@ Creation returns a fully loaded object. Use `.refresh()` on previously evaluated
 collections to see new objects. Listing filters do not supply creation values;
 `card.children.create(...)` supplies the parent.
 
+Tags are project-scoped models with a collection of matching cards:
+
+```python
+card.tags.add("research")
+card.tags.remove("draft")
+tag = card.tags[0]  # or project.tags.get("research")
+for related_card in tag.cards:
+    print(related_card.title)
+```
+
+Tag collections are lazy and cached. Mutations refresh the card and invalidate
+its tag cache; other collections use explicit `.refresh()`. The daemon validates
+and normalizes tag inputs. `.get(name)` uses the normalized name. Removal edits
+the trailing tag line; body mentions remain until you edit the content.
+Project tags include `card_count`, ordered by descending count then name.
+
 Collections fetch lazily and cache results as you iterate. Use `.all()` for an
 independent query and `.refresh()` to discard cached results. Project filters are
 `name` (substring), `updated_after`, and `updated_before`; card queries support

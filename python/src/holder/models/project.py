@@ -24,6 +24,7 @@ from ..generated.models import (
 )
 from ..generated.types import UNSET, Unset
 from .card import CardCollection
+from .tag import TagCollection
 
 if TYPE_CHECKING:
     from ..client import Holder
@@ -129,6 +130,10 @@ class Project:
     @cached_property
     def cards(self) -> CardCollection:
         return CardCollection(self)
+
+    @cached_property
+    def tags(self) -> TagCollection:
+        return TagCollection(self)
 
     @classmethod
     def _from(cls, holder: Holder, data: Any) -> Self:
