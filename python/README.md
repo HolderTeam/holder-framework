@@ -73,6 +73,18 @@ and normalizes tag inputs. `.get(name)` uses the normalized name. Removal edits
 the trailing tag line; body mentions remain until you edit the content.
 Project tags include `card_count`, ordered by descending count then name.
 
+Move cards using exactly one target:
+
+```python
+card.move(parent=another_card)  # append as a child
+card.move(before=sibling)
+card.move(after=sibling)
+```
+
+Relative moves adopt the target's parent, including when the target is a root.
+The daemon enforces hierarchy and project rules. Moves refresh the card; refresh
+previously evaluated listings explicitly. `parent=None` is not supported yet.
+
 Collections fetch lazily and cache results as you iterate. Use `.all()` for an
 independent query and `.refresh()` to discard cached results. Project filters are
 `name` (substring), `updated_after`, and `updated_before`; card queries support
