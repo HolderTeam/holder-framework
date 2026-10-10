@@ -38,7 +38,7 @@ runs:
           echo "CCACHE_BASEDIR=${GITHUB_WORKSPACE}"
           echo "CCACHE_NOHASHDIR=true"
           echo "CCACHE_COMPILERCHECK=content"
-          echo "CCACHE_MAXSIZE=500M"
+          echo "CCACHE_MAXSIZE=1G"
         } >> "$GITHUB_ENV"
 
     # Pull requests restore the compiler cache that main saves, as with vcpkg's binary cache.

@@ -74,7 +74,7 @@ jobs:
           "CCACHE_BASEDIR=${{ github.workspace }}" >> $env:GITHUB_ENV
           "CCACHE_NOHASHDIR=true" >> $env:GITHUB_ENV
           "CCACHE_COMPILERCHECK=content" >> $env:GITHUB_ENV
-          "CCACHE_MAXSIZE=500M" >> $env:GITHUB_ENV
+          "CCACHE_MAXSIZE=2G" >> $env:GITHUB_ENV
 
       # Pull requests restore the compiler cache that main saves, as with vcpkg's binary cache.
       - name: Restore compiler cache
