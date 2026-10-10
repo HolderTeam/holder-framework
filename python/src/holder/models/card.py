@@ -26,6 +26,7 @@ from ..generated.models.get_projects_project_id_cards_parent_type_0 import (
     GetProjectsProjectIdCardsParentType0 as CardParent,
 )
 from ..generated.types import UNSET, Unset
+from .search import CardSearchCollection
 from .tag import CardTagCollection
 
 if TYPE_CHECKING:
@@ -73,6 +74,19 @@ class CardCollection(Collection["Card"]):
 
     def roots(self) -> Self:
         return self._clone({**self._query, "parent": CardParent.ROOTS})
+
+    def search(self, query: str) -> CardSearchCollection:
+        """Search this project's cards using the daemon's full-text query syntax.
+
+        Tag and hierarchy filters cannot be combined with the search endpoint.
+        """
+        if not isinstance(query, str):
+            raise TypeError("query must be a string")
+        if not query.strip():
+            raise ValueError("query must be nonempty")
+        if self._query:
+            raise ValueError("Search does not support tag or hierarchy filters")
+        return CardSearchCollection(self._project, query)
 
     def _fetch_page(self) -> tuple[list[Card], str | None]:
         data = self._holder._call(

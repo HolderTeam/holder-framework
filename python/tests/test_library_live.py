@@ -222,6 +222,53 @@ def test_card_moves_against_daemon(daemon):
             card.move(parent=parent)
 
 
+def test_card_search_against_daemon(daemon):
+    url, token, raw, _ = daemon
+    with Holder(url=url, token=token) as h:
+        project = h.projects.create(name="Python search", privacy_mode="plain")
+        other = h.projects.create(name="Other search", privacy_mode="plain")
+        cards = [
+            project.cards.create(
+                title=f"Search card {i}",
+                content=f"research notes number {i}" + (" café" if i == 0 else ""),
+            )
+            for i in range(101)
+        ]
+        child = cards[0].children.create(
+            title="Child", content="research notes for a child"
+        )
+        other.cards.create(
+            title="Foreign", content="research notes from another project"
+        )
+        project.cards.create(title="Unrelated", content="Nothing matching here")
+        assert raw.delete(f"/cards/{cards[1].id}").status_code == 200
+        results = project.cards.search('"research notes"')
+        rows = list(results)
+        expected = {c.id for c in cards} - {cards[1].id}
+        expected.add(child.id)
+        assert len(rows) == 101
+        assert {r.card_id for r in rows} == expected
+        assert project.cards.search("café")[0].card_id == cards[0].id
+        assert [r.rank for r in rows] == sorted(r.rank for r in rows)
+        assert all("research" in r.snippet for r in rows)
+        first = rows[0]
+        assert first.card.project_id == project.id
+        assert "research notes" in first.card.content
+        assert list(project.cards.search("quartzunfindable")) == []
+        with pytest.raises(APIError) as malformed:
+            list(project.cards.search('"'))
+        assert malformed.value.status == 400
+        first.card.update(content="Changed to unrelated content")
+        assert raw.delete(f"/cards/{rows[1].card_id}").status_code == 200
+        with pytest.raises(NotFoundError):
+            _ = rows[1].card
+        assert len(list(results)) == 101  # Already evaluated search stays cached.
+        assert {r.card_id for r in results.refresh()} == expected - {
+            first.card_id,
+            rows[1].card_id,
+        }
+
+
 def test_daemon_card_pages(daemon):
     _, _, raw, _ = daemon
     project = create_project(raw, "Pages")

@@ -85,6 +85,20 @@ Relative moves adopt the target's parent, including when the target is a root.
 The daemon enforces hierarchy and project rules. Moves refresh the card; refresh
 previously evaluated listings explicitly. `parent=None` is not supported yet.
 
+Search returns lazy, relevance-ordered results with matching snippets:
+
+```python
+for result in project.cards.search("research notes"):
+    print(result.title, result.snippet)
+    print(result.card.content)  # fetches the full Card on first access
+```
+
+Queries use the daemon's full-text syntax and are passed through unchanged.
+Search collections support indexing, `.all()` and `.refresh()`. Result metadata
+comes from the query; `result.card` loads and caches the current project-scoped
+card. Pagination observes live data. Search cannot combine tag or hierarchy
+filters, so searching a filtered card collection raises `ValueError`.
+
 Collections fetch lazily and cache results as you iterate. Use `.all()` for an
 independent query and `.refresh()` to discard cached results. Project filters are
 `name` (substring), `updated_after`, and `updated_before`; card queries support
