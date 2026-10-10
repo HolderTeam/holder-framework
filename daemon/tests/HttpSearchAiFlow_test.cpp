@@ -8,6 +8,7 @@
 using holder::test::create_project;
 using holder::test::ensure_uuid_seeded;
 using holder::test::http_json_request;
+using holder::test::HttpServerThreadGuard;
 using holder::test::make_temp_dir;
 using holder::test::open_db_with_schema;
 
@@ -33,9 +34,7 @@ TEST_CASE("HTTP search AI flow finds message", "[http]") {
   }
 
   holder::core::SignalHandler signals;
-  std::thread server_thread([&server, &signals]() {
-    server.run(signals);
-  });
+  HttpServerThreadGuard server_thread(server, signals);
 
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
 
@@ -80,6 +79,19 @@ TEST_CASE("HTTP search AI flow finds message", "[http]") {
   }
   REQUIRE(found);
 
-  std::raise(SIGTERM);
-  server_thread.join();
+  for (const auto& encoded_query : {"search+ai", "%22search%20ai%22"}) {
+    const auto encoded_search = http_json_request(
+        bound.bind,
+        bound.port,
+        token,
+        boost::beast::http::verb::get,
+        std::string("/search/ai?project_id=proj-1&q=") + encoded_query,
+        nlohmann::json::object(),
+        boost::beast::http::status::ok
+    );
+    REQUIRE(encoded_search["data"].size() == 1);
+    REQUIRE(encoded_search["data"][0]["message_id"] == "msg-1");
+  }
+
+  server_thread.stop();
 }

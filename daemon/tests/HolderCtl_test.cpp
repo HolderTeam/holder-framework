@@ -1435,7 +1435,8 @@ TEST_CASE("holderctl search uses the current project", "[holderctl]") {
   REQUIRE(payload["data"].is_array());
   REQUIRE(payload["data"][0]["card_id"] == "search-card");
 
-  REQUIRE(run_command(bin + " search \"unique holderctl\" >/dev/null 2>/dev/null") == 1);
+  REQUIRE(run_command(bin + " search \"unique holderctl\" > \"" + search_out.string() + "\"") == 0);
+  REQUIRE(read_text(search_out).find("search-card\tSearchable Card\n") != std::string::npos);
 
   server.stop();
   server_thread.join();
