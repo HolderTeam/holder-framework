@@ -63,12 +63,68 @@ jobs:
       - run: ruff check scripts tests src/holder --exclude src/holder/generated
       - run: python -m pytest
       - run: python -m build
+  live:
+    # Live tests against a holderd built from this tree. Daemon CI saves that build on main,
+    # so a Python-only change normally restores it; otherwise this job builds it once.
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-24.04
+    env:
+      BUILD_TYPE: RelWithDebInfo
+      STAGE: ${{ github.workspace }}/daemon/out/artifacts/linux-backend
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - id: core
+        uses: HolderTeam/holder-core/.github/actions/core-sdk@main
+        with:
+          command: resolve
+          core-ref: latest-green
+      - id: key
+        name: Compute staged daemon cache key
+        env:
+          CORE_COMMIT: ${{ steps.core.outputs.commit }}
+        run: echo "key=$(.github/scripts/linux-daemon-cache-key.sh "$BUILD_TYPE" "$CORE_COMMIT")" >> "$GITHUB_OUTPUT"
+      - id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: daemon/out/artifacts/linux-backend
+          key: ${{ steps.key.outputs.key }}
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.14'
+      - if: steps.restore.outputs.cache-hit == 'true'
+        uses: ./.github/actions/linux-daemon-deps
+      - if: steps.restore.outputs.cache-hit != 'true'
+        uses: ./.github/actions/linux-daemon-build
+        with:
+          core-commit: ${{ steps.core.outputs.commit }}
+          build-type: ${{ env.BUILD_TYPE }}
+          build-testing: 'OFF'
+      - if: steps.restore.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: daemon/out/artifacts/linux-backend
+          key: ${{ steps.key.outputs.key }}
+      - name: Test the Python API against the staged daemon
+        working-directory: python
+        run: |
+          set -euo pipefail
+          multiarch="$(gcc -print-multiarch)"
+          export LD_LIBRARY_PATH="${STAGE}/usr/lib/${multiarch}:${STAGE}/usr/lib"
+          export HOLDER_TEST_DAEMON="${STAGE}/usr/bin/holderd"
+          export HOLDER_TEST_DAEMON_CWD="${STAGE}/usr/share/holder-daemon"
+          test -x "${HOLDER_TEST_DAEMON}"
+          echo "holderd built from $(cat "${STAGE}/release/holder-daemon-commit.txt")"
+          python -m pip install -e '.[dev]'
+          python -m pytest -v tests/test_library_live.py
   result:
     name: Python check result
     # The required check. It runs even when jobs fail or are skipped, and passes only when the
     # checks succeeded or were rightly skipped.
     if: always()
-    needs: [changes, check]
+    needs: [changes, check, live]
     runs-on: ubuntu-latest
     steps:
       - name: Check job results
@@ -79,4 +135,4 @@ jobs:
           jq -r 'to_entries[] | "\(.key): \(.value.result)"' <<< "$RESULTS"
           jq -e --arg selected "$SELECTED" '
             .changes.result == "success" and
-            .check.result == (if $selected == "true" then "success" else "skipped" end)' <<< "$RESULTS" > /dev/null
+            ([.check, .live] | all(.result == (if $selected == "true" then "success" else "skipped" end)))' <<< "$RESULTS" > /dev/null
