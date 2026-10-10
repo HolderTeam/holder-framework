@@ -41,6 +41,22 @@ with Holder() as h:
     card.update(title="A better title")
 ```
 
+```python
+with Holder() as h:
+    project = h.projects.create(name="Research")
+    card = project.cards.create(title="An idea", content="My notes")
+    child = card.children.create(title="Next step")
+    child.update(content="Try it out")
+    project.update(name="Research notes")
+```
+
+The daemon chooses IDs, paths, timestamps and card placement. Project creation
+also accepts `root_path` (including `Path`) and `privacy_mode="plain"` or
+`"encrypted_git"`; omitting privacy uses the daemon's encrypted Git default.
+Creation returns a fully loaded object. Use `.refresh()` on previously evaluated
+collections to see new objects. Listing filters do not supply creation values;
+`card.children.create(...)` supplies the parent.
+
 Collections fetch lazily and cache results as you iterate. Use `.all()` for an
 independent query and `.refresh()` to discard cached results. Project filters are
 `name` (substring), `updated_after`, and `updated_before`; card queries support

@@ -2,13 +2,26 @@
 
 from __future__ import annotations
 
+import os
+import time
 from dataclasses import dataclass, field, fields
 from functools import cached_property
-from typing import TYPE_CHECKING, Any, Self, cast
+from typing import TYPE_CHECKING, Any, Literal, Self, cast
 
 from ..collections import Collection
-from ..generated.api.default import get_projects, get_projects_project_id
-from ..generated.models import ProjectPrivacyMode, ProjectSync
+from ..generated.api.default import (
+    get_projects,
+    get_projects_project_id,
+    patch_projects_project_id,
+    post_projects,
+)
+from ..generated.models import (
+    ProjectCreateRequest,
+    ProjectCreateRequestPrivacyMode,
+    ProjectPrivacyMode,
+    ProjectSync,
+    ProjectUpdateRequest,
+)
 from ..generated.types import UNSET, Unset
 from .card import CardCollection
 
@@ -17,6 +30,39 @@ if TYPE_CHECKING:
 
 
 class ProjectCollection(Collection["Project"]):
+    def create(
+        self,
+        *,
+        name: str,
+        root_path: str | os.PathLike[str] | Unset = UNSET,
+        privacy_mode: Literal["encrypted_git", "plain"] | Unset = UNSET,
+    ) -> Project:
+        """Create a project using daemon defaults for omitted settings.
+
+        Listing filters do not supply creation values. Cached listings remain
+        unchanged until refreshed. The write is never retried; if the subsequent
+        fetch fails, the project may already exist.
+        """
+        if not isinstance(name, str):
+            raise TypeError("name must be a string")
+        if not isinstance(root_path, Unset):
+            root_path = os.fspath(root_path)
+            if not isinstance(root_path, str):
+                raise TypeError("root_path must be a string or a text path")
+        mode = (
+            UNSET
+            if isinstance(privacy_mode, Unset)
+            else ProjectCreateRequestPrivacyMode(privacy_mode)
+        )
+        data = self._holder._call(
+            post_projects,
+            body=ProjectCreateRequest(
+                name=name, root_path=root_path, privacy_mode=mode
+            ),
+            write=True,
+        )
+        return self.get(data.project_id)
+
     def _clone(self, query: dict[str, Any]) -> Self:
         return type(self)(self._holder, query)
 
@@ -99,3 +145,15 @@ class Project:
             if f.name != "_holder":
                 object.__setattr__(self, f.name, getattr(fresh, f.name))
         return self
+
+    def update(self, *, name: str) -> Self:
+        """Rename this project and refresh its server metadata."""
+        if not isinstance(name, str):
+            raise TypeError("name must be a string")
+        self._holder._call(
+            patch_projects_project_id,
+            self.id,
+            body=ProjectUpdateRequest(updated_at=int(time.time()), name=name),
+            write=True,
+        )
+        return self.refresh()

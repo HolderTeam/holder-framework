@@ -82,6 +82,163 @@ def holder_for(handler):
     )
 
 
+def created(data):
+    return httpx.Response(201, json={"ok": True, "data": data})
+
+
+def test_project_create_defaults_hydration_and_listing_cache():
+    requests = []
+    stored = project_payload()
+    stored["name"] = "New project"
+
+    def respond(request):
+        requests.append(request)
+        if request.method == "POST":
+            assert json.loads(request.content) == {"name": "New project"}
+            return created(stored)
+        if request.url.path == "/projects/p-0":
+            return ok(stored)
+        return ok([stored] if any(r.method == "POST" for r in requests) else [])
+
+    with holder_for(respond) as h:
+        assert list(h.projects) == []
+        project = h.projects.filter(name="Unrelated").create(name="New project")
+        assert isinstance(project, Project)
+        assert project.id == "p-0"
+        assert project.root_path == "/p/0"
+        assert project.created_at == 1
+        assert list(h.projects) == []
+        assert h.projects.refresh()[0].id == project.id
+        assert [r.method for r in requests] == ["GET", "POST", "GET", "GET"]
+
+
+def test_project_create_explicit_options_and_rename(tmp_path):
+    stored = project_payload()
+
+    def respond(request):
+        if request.method == "POST":
+            assert json.loads(request.content) == {
+                "name": "Research",
+                "root_path": str(tmp_path),
+                "privacy_mode": "plain",
+            }
+            return created(stored)
+        if request.method == "PATCH":
+            body = json.loads(request.content)
+            assert set(body) == {"name", "updated_at"}
+            assert isinstance(body["updated_at"], int)
+            stored.update(body)
+            return ok({"project_id": "p-0"})
+        return ok(stored)
+
+    with holder_for(respond) as h:
+        project = h.projects.create(
+            name="Research", root_path=tmp_path, privacy_mode="plain"
+        )
+        assert project.update(name="Renamed") is project
+        assert project.name == "Renamed"
+
+
+@pytest.mark.parametrize("scope", ["all", "roots", "children", "filtered_children"])
+def test_card_create_hierarchy_defaults_and_content(scope):
+    requests = []
+    parent = "c-0000" if "children" in scope else None
+
+    def respond(request):
+        requests.append(request)
+        if request.method == "POST":
+            expected = {"project_id": "p-0", "title": "New card", "content": ""}
+            if parent is not None:
+                expected["parent_card_id"] = parent
+            assert json.loads(request.content) == expected
+            return created({"card_id": "c-0001", "rel_path": "c/1.md"})
+        if request.url.path == "/projects/p-0":
+            return ok(project_payload())
+        if request.url.path == "/cards/c-0000":
+            return ok(card_payload(content=True))
+        data = card_payload(1, content=True)
+        data.update(parent_card_id=parent, content="", sort_key=1024)
+        return ok(data)
+
+    with holder_for(respond) as h:
+        project = h.projects.get("p-0")
+        collection = project.cards
+        if scope == "roots":
+            collection = collection.roots()
+        elif "children" in scope:
+            collection = project.cards.get("c-0000").children
+        if scope == "filtered_children":
+            collection = collection.filter(tag="Research")
+        card = collection.create(title="New card")
+        assert isinstance(card, Card)
+        assert card.id == "c-0001"
+        assert card.content == ""
+        assert card.parent_card_id == parent
+        assert card.sort_key == 1024
+        assert requests[-1].url.path == "/cards/c-0001"
+
+
+@pytest.mark.parametrize("operation", ["project_create", "card_create", "rename"])
+@pytest.mark.parametrize("error", ["auth", "transport", "validation", "hydrate"])
+def test_new_writes_are_never_retried(monkeypatch, operation, error):
+    cli = mock_cli(monkeypatch)
+    writes = []
+
+    def respond(request):
+        if request.method in ("POST", "PATCH"):
+            writes.append(request)
+            if error == "auth":
+                return failure(401)
+            if error == "transport":
+                raise httpx.ReadError("Interrupted", request=request)
+            if error == "validation":
+                return failure(400)
+            if operation == "project_create":
+                return created(project_payload())
+            if operation == "card_create":
+                return created({"card_id": "c-0000", "rel_path": "c/0.md"})
+            return ok({"project_id": "p-0"})
+        if writes:
+            return failure(404)
+        return ok(project_payload())
+
+    exception = {
+        "auth": AuthenticationError,
+        "transport": ConnectionError,
+        "validation": APIError,
+        "hydrate": NotFoundError,
+    }[error]
+    with Holder(transport=httpx.MockTransport(respond)) as h:
+        with pytest.raises(exception):
+            if operation == "project_create":
+                h.projects.create(name="New project")
+            elif operation == "card_create":
+                h.projects.get("p-0").cards.create(title="New card")
+            else:
+                h.projects.get("p-0").update(name="New name")
+        assert len(writes) == 1
+        assert cli.call_count == 2
+
+
+def test_create_and_rename_validate_arguments_without_writing():
+    def respond(request):
+        assert request.method == "GET"
+        return ok(project_payload())
+
+    with holder_for(respond) as h:
+        project = h.projects.get("p-0")
+        for kwargs in ({"name": None}, {"name": "P", "root_path": b"/p"}):
+            with pytest.raises(TypeError):
+                h.projects.create(**kwargs)
+        with pytest.raises(ValueError):
+            h.projects.create(name="P", privacy_mode="unknown")
+        with pytest.raises(TypeError):
+            project.update(name=None)
+        for kwargs in ({"title": None}, {"title": "C", "content": None}):
+            with pytest.raises(TypeError):
+                project.cards.create(**kwargs)
+
+
 def test_lazy_projects_pages_cache_queries_indexing_and_close():
     requests = []
 

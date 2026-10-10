@@ -98,6 +98,41 @@ def create_card(raw, project_id, index, parent=None):
     return response.json()["data"]["card_id"]
 
 
+def test_create_read_edit_workflow_against_daemon(daemon):
+    url, token, _, _ = daemon
+    with Holder(url=url, token=token) as h:
+        project = h.projects.create(name="Python workflow", privacy_mode="plain")
+        assert project.id
+        assert project.root_path
+        assert project.created_at > 0
+        assert h.projects.get(project.id).name == "Python workflow"
+        assert list(project.cards) == []
+        card = project.cards.create(title="Research", content="Notes\n#research")
+        child = card.children.create(title="Follow-up")
+        sibling = project.cards.roots().create(title="Another root")
+        assert card.parent_card_id is None
+        assert child.parent_card_id == card.id
+        assert child.content == ""
+        assert sibling.sort_key > card.sort_key
+        assert list(project.cards) == []
+        assert {c.id for c in project.cards.refresh()} == {
+            card.id,
+            child.id,
+            sibling.id,
+        }
+        assert {c.id for c in project.cards.roots()} == {card.id, sibling.id}
+        assert [c.id for c in card.children] == [child.id]
+        assert [c.id for c in project.cards.filter(tag="Research")] == [card.id]
+        assert child.update(title="Next step", content="More notes") is child
+        assert project.cards.get(child.id).content == "More notes"
+        assert child.title == "Next step"
+        assert project.update(name="Renamed Python workflow") is project
+        assert h.projects.get(project.id).name == "Renamed Python workflow"
+        project.refresh()
+        assert len(list(project.cards.all())) == 3
+        assert len(list(project.cards.roots())) == 2
+
+
 def test_daemon_card_pages(daemon):
     _, _, raw, _ = daemon
     project = create_project(raw, "Pages")
