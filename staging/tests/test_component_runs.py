@@ -28,6 +28,10 @@ class RunSelectionTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             tool.resolve("owner/repo", "ci.yml", "main", "backend", "2", self.request)
 
+    def test_backend_workflow_follows_repository(self):
+        self.assertEqual(tool.backend_workflow("HolderTeam/holder-core"), "daemon-integration.yml")
+        self.assertEqual(tool.backend_workflow("HolderTeam/holder-framework"), "daemon-ci.yml")
+
     def test_explicit_failed_run_is_rejected(self):
         def request(path, **query):
             return {**self.make_run(1), "conclusion": "failure"}

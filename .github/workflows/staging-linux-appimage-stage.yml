@@ -172,7 +172,7 @@ jobs:
             "$desktop_artifact")"
           backend_artifact=holder-daemon-linux-x86_64
           if [[ "$BUILD_TYPE" == Release ]]; then backend_artifact+=-release; fi
-          backend_workflow=ci.yml
+          backend_workflow=daemon-ci.yml
           if [[ "$BACKEND_REPOSITORY" == HolderTeam/holder-core ]]; then
             backend_workflow=daemon-integration.yml
           fi
