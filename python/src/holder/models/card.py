@@ -14,8 +14,14 @@ from ..generated.api.default import (
     get_projects_project_id_cards,
     patch_cards_card_id,
     post_cards,
+    post_cards_card_id_move,
 )
-from ..generated.models import CardCreateRequest, CardUpdateRequest
+from ..generated.models import (
+    CardCreateRequest,
+    CardMoveIntent,
+    CardMoveRequest,
+    CardUpdateRequest,
+)
 from ..generated.models.get_projects_project_id_cards_parent_type_0 import (
     GetProjectsProjectIdCardsParentType0 as CardParent,
 )
@@ -168,4 +174,44 @@ class Card:
             updated_at=int(time.time()), title=title, content=content
         )
         self._project._holder._call(patch_cards_card_id, self.id, body=body, write=True)
+        return self.refresh()
+
+    def move(
+        self,
+        *,
+        parent: Card | Unset = UNSET,
+        before: Card | Unset = UNSET,
+        after: Card | Unset = UNSET,
+    ) -> Self:
+        """Move into a parent or immediately before/after a target card.
+
+        Supply exactly one Card. Relative moves adopt the target's parent.
+        The daemon enforces project membership and prevents hierarchy cycles.
+        The moved card is refreshed; evaluated listings need explicit refresh.
+        Writes are never retried, even if the subsequent refresh fails.
+        """
+        supplied = [
+            (intent, target)
+            for intent, target in (
+                (CardMoveIntent.INTO, parent),
+                (CardMoveIntent.BEFORE, before),
+                (CardMoveIntent.AFTER, after),
+            )
+            if not isinstance(target, Unset)
+        ]
+        if len(supplied) != 1:
+            raise TypeError("Supply exactly one of parent, before or after")
+        intent, target = supplied[0]
+        if not isinstance(target, Card):
+            raise TypeError("The move target must be a Card")
+        self._project._holder._call(
+            post_cards_card_id_move,
+            self.id,
+            body=CardMoveRequest(
+                project_id=self._project.id,
+                intent=intent,
+                target_card_id=target.id,
+            ),
+            write=True,
+        )
         return self.refresh()

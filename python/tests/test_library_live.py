@@ -14,7 +14,7 @@ import httpx
 import pytest
 
 from holder import Holder
-from holder.exceptions import NotFoundError
+from holder.exceptions import APIError, NotFoundError
 
 DAEMON = os.environ.get("HOLDER_TEST_DAEMON")
 pytestmark = pytest.mark.skipif(
@@ -174,6 +174,52 @@ def test_tag_collections_and_body_mentions_against_daemon(daemon):
         assert {c.id for c in tag.cards.refresh()} == {sibling.id}
         card.update(content="The user removed the inline mention.")
         assert list(card.tags) == []
+
+
+def test_card_moves_against_daemon(daemon):
+    url, token, raw, _ = daemon
+    with Holder(url=url, token=token) as h:
+        project = h.projects.create(name="Python moves", privacy_mode="plain")
+        other = h.projects.create(name="Other moves", privacy_mode="plain")
+        parent = project.cards.create(title="Parent")
+        target = parent.children.create(title="Target")
+        root = project.cards.create(title="Root")
+        card = project.cards.create(title="Moving", content="Keep this body\n#research")
+        child = card.children.create(title="Child")
+        foreign = other.cards.create(title="Foreign")
+        assert [c.id for c in parent.children] == [target.id]
+        assert card.move(parent=parent) is card
+        assert card.parent_card_id == parent.id
+        assert card.sort_key > target.sort_key
+        assert card.content == "Keep this body\n#research"
+        assert child.refresh().parent_card_id == card.id
+        # Evaluated listings retain their cache until explicitly refreshed.
+        assert [c.id for c in parent.children] == [target.id]
+        assert {c.id for c in parent.children.refresh()} == {target.id, card.id}
+        card.move(before=target)
+        assert card.parent_card_id == parent.id
+        assert card.sort_key < target.sort_key
+        card.move(after=target)
+        assert card.sort_key > target.sort_key
+        # Relative moves can change hierarchy, including to an existing root's level.
+        card.move(before=root)
+        assert card.parent_card_id is None
+        assert card.sort_key < root.sort_key
+        assert child.refresh().parent_card_id == card.id
+        assert [c.id for c in parent.children.refresh()] == [target.id]
+        with pytest.raises(APIError) as cycle:
+            card.move(parent=child)
+        assert cycle.value.status == 422
+        for kwargs in ({"parent": foreign}, {"before": foreign}, {"after": foreign}):
+            with pytest.raises(NotFoundError):
+                card.move(**kwargs)
+        assert card.refresh().parent_card_id is None
+        assert raw.delete(f"/cards/{target.id}").status_code == 200
+        with pytest.raises(NotFoundError):
+            card.move(after=target)
+        assert raw.delete(f"/cards/{card.id}").status_code == 200
+        with pytest.raises(NotFoundError):
+            card.move(parent=parent)
 
 
 def test_daemon_card_pages(daemon):
