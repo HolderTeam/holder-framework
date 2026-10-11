@@ -136,6 +136,12 @@ provenance is retained in `Holder.app/Contents/Resources/core-build.json`,
 `release/holder-core-provenance.json` and the release-candidate metadata.
 Explicit core and component run overrides support reproducible staging.
 
+Homebrew's GTK is built without the macOS accessibility bridge (AccessKit), so staging rebuilds the
+`libgtk-4` library from Homebrew's source version with `-Daccesskit=enabled`, using checksum-pinned
+AccessKit C 0.18.0, before bundling (`staging/scripts/build-macos-accessible-gtk.sh`). Staging fails if the
+final bundle's GTK no longer depends on AccessKit, and records the versions in `gtk-accessibility-build.json`.
+Before a release, try a staged app with VoiceOver: a linked bridge does not mean every Holder interaction is accessible.
+
 How to manually test a prerelease development version of Holder, aka a "staged copy".
 
 1. Go to the Mac OS staged app action:
