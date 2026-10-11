@@ -266,7 +266,7 @@ jobs:
 
       - name: Save staged daemon
         if: github.repository == 'HolderTeam/holder-framework'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: daemon/out/artifacts/linux-backend
           key: ${{ steps.daemon-cache.outputs.key }}

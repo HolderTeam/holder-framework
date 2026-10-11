@@ -70,7 +70,7 @@ jobs:
 
       # Pull requests restore the compiler cache that main saves, as with vcpkg's binary cache.
       - name: Restore compiler cache
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: .ccache
           key: ccache-${{ runner.os }}-${{ inputs.build_type }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -106,7 +106,7 @@ jobs:
 
       - name: Save compiler cache
         if: github.event_name != 'pull_request'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: .ccache
           key: ccache-${{ runner.os }}-${{ inputs.build_type }}-${{ github.run_id }}-${{ github.run_attempt }}
