@@ -92,6 +92,11 @@ def sync_detailed(
 ) -> Response[CardMoveResponse | ErrorResponse]:
     """Move/reparent/reorder a card using card move intent
 
+     Placement is resolved and written under the project lock. When the card's new neighbours leave no
+    room between their sort keys (tied keys, or a gap used up by repeated moves), nearby siblings are
+    re-spaced in the same commit, keeping their order. The response describes only the moved card, so a
+    client holding other cards' sort_key values should refresh the listing.
+
     Args:
         card_id (str):
         body (CardMoveRequest):
@@ -124,6 +129,11 @@ def sync(
 ) -> CardMoveResponse | ErrorResponse | None:
     """Move/reparent/reorder a card using card move intent
 
+     Placement is resolved and written under the project lock. When the card's new neighbours leave no
+    room between their sort keys (tied keys, or a gap used up by repeated moves), nearby siblings are
+    re-spaced in the same commit, keeping their order. The response describes only the moved card, so a
+    client holding other cards' sort_key values should refresh the listing.
+
     Args:
         card_id (str):
         body (CardMoveRequest):
@@ -150,6 +160,11 @@ async def asyncio_detailed(
     body: CardMoveRequest,
 ) -> Response[CardMoveResponse | ErrorResponse]:
     """Move/reparent/reorder a card using card move intent
+
+     Placement is resolved and written under the project lock. When the card's new neighbours leave no
+    room between their sort keys (tied keys, or a gap used up by repeated moves), nearby siblings are
+    re-spaced in the same commit, keeping their order. The response describes only the moved card, so a
+    client holding other cards' sort_key values should refresh the listing.
 
     Args:
         card_id (str):
@@ -180,6 +195,11 @@ async def asyncio(
     body: CardMoveRequest,
 ) -> CardMoveResponse | ErrorResponse | None:
     """Move/reparent/reorder a card using card move intent
+
+     Placement is resolved and written under the project lock. When the card's new neighbours leave no
+    room between their sort keys (tied keys, or a gap used up by repeated moves), nearby siblings are
+    re-spaced in the same commit, keeping their order. The response describes only the moved card, so a
+    client holding other cards' sort_key values should refresh the listing.
 
     Args:
         card_id (str):

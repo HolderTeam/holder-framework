@@ -102,6 +102,7 @@ from .card_move_request import CardMoveRequest
 from .card_move_response import CardMoveResponse
 from .card_move_result import CardMoveResult
 from .card_page import CardPage
+from .card_page_item import CardPageItem
 from .card_page_response import CardPageResponse
 from .card_patch_response import CardPatchResponse
 from .card_patch_response_data import CardPatchResponseData
@@ -395,6 +396,7 @@ __all__ = (
     "CardMoveResponse",
     "CardMoveResult",
     "CardPage",
+    "CardPageItem",
     "CardPageResponse",
     "CardPatchResponse",
     "CardPatchResponseData",

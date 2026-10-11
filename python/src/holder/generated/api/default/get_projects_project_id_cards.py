@@ -25,6 +25,7 @@ def _get_kwargs(
     | Unset = GetProjectsProjectIdCardsOrder.CARD_ID_ASC,
     limit: int | Unset = 200,
     cursor: str | Unset = UNSET,
+    include_content: bool | Unset = False,
 ) -> dict[str, Any]:
 
     params: dict[str, Any] = {}
@@ -50,6 +51,8 @@ def _get_kwargs(
     params["limit"] = limit
 
     params["cursor"] = cursor
+
+    params["include_content"] = include_content
 
     params = {k: v for k, v in params.items() if v is not UNSET and v is not None}
 
@@ -97,6 +100,16 @@ def _parse_response(
 
         return response_500
 
+    if response.status_code == 501:
+        response_501 = ErrorResponse.from_dict(response.json())
+
+        return response_501
+
+    if response.status_code == 503:
+        response_503 = ErrorResponse.from_dict(response.json())
+
+        return response_503
+
     if client.raise_on_unexpected_status:
         raise errors.UnexpectedStatus(response.status_code, response.content)
     else:
@@ -124,6 +137,7 @@ def sync_detailed(
     | Unset = GetProjectsProjectIdCardsOrder.CARD_ID_ASC,
     limit: int | Unset = 200,
     cursor: str | Unset = UNSET,
+    include_content: bool | Unset = False,
 ) -> Response[CardPageResponse | ErrorResponse]:
     """Page through a project's live cards
 
@@ -137,6 +151,7 @@ def sync_detailed(
             GetProjectsProjectIdCardsOrder.CARD_ID_ASC.
         limit (int | Unset):  Default: 200.
         cursor (str | Unset):
+        include_content (bool | Unset):  Default: False.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -153,6 +168,7 @@ def sync_detailed(
         order=order,
         limit=limit,
         cursor=cursor,
+        include_content=include_content,
     )
 
     response = client.get_httpx_client().request(
@@ -172,6 +188,7 @@ def sync(
     | Unset = GetProjectsProjectIdCardsOrder.CARD_ID_ASC,
     limit: int | Unset = 200,
     cursor: str | Unset = UNSET,
+    include_content: bool | Unset = False,
 ) -> CardPageResponse | ErrorResponse | None:
     """Page through a project's live cards
 
@@ -185,6 +202,7 @@ def sync(
             GetProjectsProjectIdCardsOrder.CARD_ID_ASC.
         limit (int | Unset):  Default: 200.
         cursor (str | Unset):
+        include_content (bool | Unset):  Default: False.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -202,6 +220,7 @@ def sync(
         order=order,
         limit=limit,
         cursor=cursor,
+        include_content=include_content,
     ).parsed
 
 
@@ -215,6 +234,7 @@ async def asyncio_detailed(
     | Unset = GetProjectsProjectIdCardsOrder.CARD_ID_ASC,
     limit: int | Unset = 200,
     cursor: str | Unset = UNSET,
+    include_content: bool | Unset = False,
 ) -> Response[CardPageResponse | ErrorResponse]:
     """Page through a project's live cards
 
@@ -228,6 +248,7 @@ async def asyncio_detailed(
             GetProjectsProjectIdCardsOrder.CARD_ID_ASC.
         limit (int | Unset):  Default: 200.
         cursor (str | Unset):
+        include_content (bool | Unset):  Default: False.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -244,6 +265,7 @@ async def asyncio_detailed(
         order=order,
         limit=limit,
         cursor=cursor,
+        include_content=include_content,
     )
 
     response = await client.get_async_httpx_client().request(**kwargs)
@@ -261,6 +283,7 @@ async def asyncio(
     | Unset = GetProjectsProjectIdCardsOrder.CARD_ID_ASC,
     limit: int | Unset = 200,
     cursor: str | Unset = UNSET,
+    include_content: bool | Unset = False,
 ) -> CardPageResponse | ErrorResponse | None:
     """Page through a project's live cards
 
@@ -274,6 +297,7 @@ async def asyncio(
             GetProjectsProjectIdCardsOrder.CARD_ID_ASC.
         limit (int | Unset):  Default: 200.
         cursor (str | Unset):
+        include_content (bool | Unset):  Default: False.
 
     Raises:
         errors.UnexpectedStatus: If the server returns an undocumented status code and Client.raise_on_unexpected_status is True.
@@ -292,5 +316,6 @@ async def asyncio(
             order=order,
             limit=limit,
             cursor=cursor,
+            include_content=include_content,
         )
     ).parsed

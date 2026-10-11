@@ -849,6 +849,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/CardListItem"
+    CardPageItem:
+      allOf:
+        - $ref: "#/components/schemas/CardListItem"
+        - type: object
+          properties:
+            content:
+              type: string
+              description: The card's body. Present only when include_content is true.
     CardPage:
       type: object
       required: [items, next_cursor]
@@ -856,7 +864,7 @@ components:
         items:
           type: array
           items:
-            $ref: "#/components/schemas/CardListItem"
+            $ref: "#/components/schemas/CardPageItem"
         next_cursor:
           type: string
           nullable: true
@@ -3307,6 +3315,12 @@ paths:
             minLength: 1
             maxLength: 8192
           description: Continuation from next_cursor. Keep the project, filters and ordering unchanged.
+        - in: query
+          name: include_content
+          schema:
+            type: boolean
+            default: false
+          description: Include each card's body. The page is selected and every body read under one project lock, and the whole page fails if a body cannot be read (for example a locked encrypted project). limit is at most 1000 when true. The cursor is the same with or without content.
       responses:
         "200":
           description: A page of matching cards
@@ -3315,7 +3329,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/CardPageResponse"
         "400":
-          description: Invalid parameter or cursor, including a cursor from a different query
+          description: Invalid parameter or cursor, including a cursor from a different query, or a privacy error reading content
           content:
             application/json:
               schema:
@@ -3334,6 +3348,18 @@ paths:
                 $ref: "#/components/schemas/ErrorResponse"
         "405":
           description: Method not allowed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "501":
+          description: Content pages unavailable because the daemon has no card store
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: The keyring needed to read an encrypted project's content is unavailable
           content:
             application/json:
               schema:
@@ -4516,6 +4542,7 @@ paths:
   /cards/{card_id}/move:
     post:
       summary: Move/reparent/reorder a card using card move intent
+      description: Placement is resolved and written under the project lock. When the card's new neighbours leave no room between their sort keys (tied keys, or a gap used up by repeated moves), nearby siblings are re-spaced in the same commit, keeping their order. The response describes only the moved card, so a client holding other cards' sort_key values should refresh the listing.
       parameters:
         - name: card_id
           in: path
