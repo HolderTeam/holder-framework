@@ -59,7 +59,8 @@ AuthenticatedDispatchResult dispatch_authenticated_routes(
   };
 
   if (resource == "projects" || resource == "recovery-token") {
-    if (resource == "projects" && handle_project_card_routes(path, req, res, db, decoded_param))
+    if (resource == "projects" &&
+        handle_project_card_routes(path, req, res, db, decoded_param, card_store))
       return {};
     if (resource == "projects" && handle_history_routes(path, req, res, db, param, card_store))
       return {};

@@ -160,7 +160,11 @@ class Card:
             if not f.name.startswith("_")
         }
         values = {k: None if isinstance(v, Unset) else v for k, v in values.items()}
-        return cls(**values, _project=project, _content=getattr(data, "content", None))
+        # Collection pages carry content only when asked; an absent field means "not loaded".
+        content = getattr(data, "content", None)
+        if isinstance(content, Unset):
+            content = None
+        return cls(**values, _project=project, _content=content)
 
     def refresh(self) -> Self:
         fresh = self._project.cards.get(self.id)

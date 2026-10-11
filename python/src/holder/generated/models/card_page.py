@@ -8,7 +8,7 @@ from attrs import field as _attrs_field
 from typing_extensions import Self
 
 if TYPE_CHECKING:
-    from ..models.card_list_item import CardListItem
+    from ..models.card_page_item import CardPageItem
 
 
 T = TypeVar("T", bound="CardPage")
@@ -18,11 +18,11 @@ T = TypeVar("T", bound="CardPage")
 class CardPage:
     """
     Attributes:
-        items (list[CardListItem]):
+        items (list[CardPageItem]):
         next_cursor (None | str): Continue with this cursor, or null when there are no more results.
     """
 
-    items: list[CardListItem]
+    items: list[CardPageItem]
     next_cursor: None | str
     additional_properties: dict[str, Any] = _attrs_field(init=False, factory=dict)
 
@@ -48,13 +48,13 @@ class CardPage:
 
     @classmethod
     def from_dict(cls, src_dict: Mapping[str, Any]) -> Self:
-        from ..models.card_list_item import CardListItem
+        from ..models.card_page_item import CardPageItem
 
         d = dict(src_dict)
         items = []
         _items = d.pop("items")
         for items_item_data in _items:
-            items_item = CardListItem.from_dict(items_item_data)
+            items_item = CardPageItem.from_dict(items_item_data)
 
             items.append(items_item)
 

@@ -3,6 +3,7 @@
 #include "card/CardRepo.h"
 #include "card/TagExtractor.h"
 #include "identity/Uuid.h"
+#include "privacy/PrivacyError.h"
 #include "project/ProjectRepo.h"
 
 #include <charconv>
@@ -47,7 +48,8 @@ bool handle_project_card_routes(
     const http::request<http::string_body>& req,
     http::response<http::string_body>& res,
     holder::platform::Db& db,
-    const std::function<std::string(const std::string&)>& param_get
+    const std::function<std::string(const std::string&)>& param_get,
+    holder::card::CardStore* card_store
 ) {
   constexpr std::string_view prefix = "/projects/";
   constexpr std::string_view suffix = "/cards";
@@ -88,6 +90,13 @@ bool handle_project_card_routes(
       else
         query.parent = holder::card::CardPageChildrenOf{parent};
     }
+    const auto content_raw = param_get("include_content");
+    if (!content_raw.empty() && content_raw != "true" && content_raw != "1" &&
+        content_raw != "false" && content_raw != "0")
+      throw std::invalid_argument("include_content must be true or false.");
+    const bool include_content = content_raw == "true" || content_raw == "1";
+    if (include_content && limit > 1000)
+      throw std::invalid_argument("limit must be from 1 to 1000 when include_content is true.");
     const auto order_raw = param_get("order");
     const auto order = order_raw.empty() ? "card_id_asc" : order_raw;
     if (order == "updated_desc")
@@ -115,20 +124,41 @@ bool handle_project_card_routes(
       res = support::error_response(http::status::not_found, "not_found", "Project not found.");
       return true;
     }
-    holder::card::CardRepo cards(db);
-    auto rows = cards.list_collection_page(project_id, query, limit + 1);
+    // Content pages go through core's locked read, which selects and reads every body under
+    // one project lock and fails the whole page if a body is unavailable.
+    holder::card::CollectionCardPage page;
+    if (include_content) {
+      if (!card_store) {
+        res = support::error_response(
+            http::status::not_implemented,
+            "not_implemented",
+            "Card store unavailable."
+        );
+        return true;
+      }
+      page = card_store->list_collection_page(project_id, query, limit, true);
+    } else {
+      holder::card::CardRepo cards(db);
+      auto rows = cards.list_collection_page(project_id, query, limit + 1);
+      if (rows.size() > static_cast<std::size_t>(limit)) {
+        rows.resize(static_cast<std::size_t>(limit));
+        page.next_cursor =
+            holder::card::CardPageCursor{rows.back().card_id, rows.back().updated_at};
+      }
+      for (auto& card : rows)
+        page.cards.push_back({std::move(card), {}});
+    }
     nlohmann::json next_cursor = nullptr;
-    if (rows.size() > static_cast<std::size_t>(limit)) {
-      rows.resize(static_cast<std::size_t>(limit));
+    if (page.next_cursor.has_value()) {
       next_cursor = encode_cursor(
           {{"version", 1},
            {"query", scope},
-           {"card_id", rows.back().card_id},
-           {"updated_at", rows.back().updated_at}}
+           {"card_id", page.next_cursor->card_id},
+           {"updated_at", *page.next_cursor->updated_at}}
       );
     }
     auto items = nlohmann::json::array();
-    for (const auto& card : rows) {
+    for (const auto& [card, content] : page.cards) {
       items.push_back(
           {{"card_id", card.card_id},
            {"project_id", card.project_id},
@@ -144,11 +174,21 @@ bool handle_project_card_routes(
             card.deleted_at.has_value() ? nlohmann::json(*card.deleted_at) : nlohmann::json(nullptr)
            }}
       );
+      if (include_content) items.back()["content"] = content;
     }
     res = support::json_response(
         http::status::ok,
         {{"ok", true},
          {"data", {{"items", std::move(items)}, {"next_cursor", std::move(next_cursor)}}}}
+    );
+  } catch (const holder::privacy::PrivacyError& ex) {
+    // A content page on a locked encrypted project, mapped as the card routes map it.
+    res = support::error_response(
+        ex.code() == holder::privacy::PrivacyErrorCode::KeyringUnavailable
+            ? http::status::service_unavailable
+            : http::status::bad_request,
+        holder::privacy::privacy_error_code_name(ex.code()),
+        ex.what()
     );
   } catch (const std::invalid_argument& ex) {
     res = support::error_response(http::status::bad_request, "bad_request", ex.what());

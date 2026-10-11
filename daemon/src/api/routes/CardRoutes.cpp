@@ -170,9 +170,9 @@ std::optional<std::string> normalize_parent_id(const std::optional<std::string>&
   return raw.substr(start, end - start + 1);
 }
 
-// The move route's intent-resolution algorithm (target/parent lookups, cycle detection,
-// sort_key arithmetic) now lives in holder::card::CardPlacementResolver (holder-core), shared
-// with holder-android; this route just parses the request, calls it, and maps its
+// The move route's placement algorithm (target/parent lookups, cycle detection, sort keys and
+// re-spacing) lives in holder-core (CardStore::move_to), shared with holder-android; this route
+// just parses the request, calls it, and maps its
 // std::runtime_error vocabulary onto this route's existing HTTP responses. See the "/move"
 // handler below.
 holder::card::CardPlacementIntent card_placement_intent_from_string(const std::string& intent) {
@@ -789,22 +789,15 @@ bool handle_card_routes(
             // a std::runtime_error("invalid_move_intent") mapped explicitly below.
             request = card_placement_request_from_json(body);
 
-            holder::card::CardRepo card_repo(db);
-            holder::card::CardPlacementResolver resolver(card_repo);
-            const auto result = resolver.resolve(project_id, card_id, request.value());
-
-            const long long updated_at = support::now_epoch_seconds();
-            card_store->move(card_id, true, result.parent_card_id, result.sort_key, updated_at);
-            // Card was just moved; missing immediately after move is not expected in normal flow.
-            // LCOV_EXCL_START
-            const auto moved_opt = card_store->get(card_id);
-            if (!moved_opt.has_value()) {
-              res =
-                  support::error_response(http::status::not_found, "not_found", "Card not found.");
-              return true;
-            }
-            // LCOV_EXCL_STOP
-            const auto& moved_card = moved_opt.value();
+            // Resolves under the project lock and writes the card with any siblings re-spaced to
+            // make room for it, in one commit.
+            const auto result = card_store->move_to(
+                project_id,
+                card_id,
+                request.value(),
+                support::now_epoch_seconds()
+            );
+            const auto& moved_card = result.card;
 
             nlohmann::json data;
             data["card_id"] = moved_card.card_id;

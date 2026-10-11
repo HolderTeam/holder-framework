@@ -157,3 +157,57 @@ TEST_CASE("Project query values decode once and match complete parameter names",
   CHECK(decoded_query_param_value("name=%252B", "name") == "%2B");
   CHECK(decoded_query_param_value("other_name=wrong&name=right", "name") == "right");
 }
+
+TEST_CASE("Project card collection pages can include card content", "[card-pages]") {
+  const auto dir = holder::test::make_temp_dir();
+  auto db = holder::test::open_db_with_schema(dir / "holder.db");
+  holder::test::create_project(db, "p", (dir / "repo").string());
+  holder::index::FtsIndexer fts(db);
+  holder::card::CardStore store(db, &fts);
+  const std::string first = "00000000-0000-4000-8000-000000000001";
+  const std::string second = "00000000-0000-4000-8000-000000000002";
+  holder::test::create_card_fixture(store, first, "p", "one", "one body\n#work", 10);
+  holder::test::create_card_fixture(store, second, "p", "two", "two body", 20);
+  auto call = [&](Params params, holder::card::CardStore* card_store) {
+    const std::string path = "/projects/p/cards";
+    http::request<http::string_body> req{http::verb::get, path, 11};
+    http::response<http::string_body> res;
+    REQUIRE(holder::api::routes::handle_project_card_routes(
+        path,
+        req,
+        res,
+        db,
+        getter(params),
+        card_store
+    ));
+    return std::make_pair(res.result(), nlohmann::json::parse(res.body()));
+  };
+
+  auto [status, payload] = call({{"include_content", "true"}, {"limit", "1"}}, &store);
+  REQUIRE(status == http::status::ok);
+  REQUIRE(payload["data"]["items"].size() == 1);
+  CHECK(payload["data"]["items"][0]["card_id"] == first);
+  CHECK(payload["data"]["items"][0]["content"] == "one body\n#work");
+  // The cursor is the same as for metadata pages, so the two can be mixed.
+  const auto cursor = payload["data"]["next_cursor"].get<std::string>();
+  auto [next_status, next] = call({{"include_content", "1"}, {"cursor", cursor}}, &store);
+  REQUIRE(next_status == http::status::ok);
+  REQUIRE(next["data"]["items"].size() == 1);
+  CHECK(next["data"]["items"][0]["content"] == "two body");
+  CHECK(next["data"]["next_cursor"].is_null());
+  CHECK(call({{"cursor", cursor}}, &store).second["data"]["items"][0]["card_id"] == second);
+
+  // Metadata pages carry no content field.
+  for (const auto& off : {"false", "0", ""}) {
+    const auto metadata = call({{"include_content", off}}, &store).second;
+    REQUIRE(metadata["data"]["items"].size() == 2);
+    CHECK_FALSE(metadata["data"]["items"][0].contains("content"));
+  }
+  CHECK(call({{"include_content", "yes"}}, &store).first == http::status::bad_request);
+  CHECK(
+      call({{"include_content", "true"}, {"limit", "1001"}}, &store).first ==
+      http::status::bad_request
+  );
+  CHECK(call({{"limit", "1001"}}, &store).first == http::status::ok);
+  CHECK(call({{"include_content", "true"}}, nullptr).first == http::status::not_implemented);
+}

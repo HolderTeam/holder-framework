@@ -513,6 +513,26 @@ TEST_CASE("CardRoutes move intent edge branches", "[card-routes]") {
     REQUIRE(child->parent_card_id == nested);
   }
 
+  SECTION("a move between tied siblings re-spaces them instead of misplacing the card") {
+    const std::string tied_first = "66666666-6666-4666-8666-666666666661";
+    const std::string tied_second = "66666666-6666-4666-8666-666666666662";
+    create(tied_first, "proj-1", "a-tied", 30, {{"sort_key", 50.0}});
+    create(tied_second, "proj-1", "z-tied", 30, {{"sort_key", 50.0}});
+
+    const auto moved = call(
+        http::verb::post,
+        "/cards/11111111-1111-4111-8111-111111111111/move",
+        {{"project_id", "proj-1"}, {"intent", "after"}, {"target_card_id", tied_first}}
+    );
+    REQUIRE(moved["ok"] == true);
+    const double first_key = card_store.get(tied_first)->sort_key;
+    const double moved_key = card_store.get("11111111-1111-4111-8111-111111111111")->sort_key;
+    const double second_key = card_store.get(tied_second)->sort_key;
+    REQUIRE(moved["data"]["sort_key"] == moved_key);
+    REQUIRE(first_key < moved_key);
+    REQUIRE(moved_key < second_key);
+  }
+
   SECTION("left no-op when source not among inferred siblings") {
     create("55555555-5555-4555-8555-555555555555", "proj-1", "Parent", 30);
     const auto payload = call(
