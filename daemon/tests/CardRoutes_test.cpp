@@ -473,6 +473,46 @@ TEST_CASE("CardRoutes move intent edge branches", "[card-routes]") {
     REQUIRE(payload["error"]["code"] == "target_not_found");
   }
 
+  SECTION("omitted parent_card_id keeps the parent; explicit null moves to the top level") {
+    const std::string middle = "66666666-6666-4666-8666-666666666666";
+    const std::string nested = "77777777-7777-4777-8777-777777777777";
+    const std::string sibling = "88888888-8888-4888-8888-888888888888";
+    const std::string grandchild = "99999999-9999-4999-8999-999999999999";
+    create(
+        middle,
+        "proj-1",
+        "Middle",
+        30,
+        {{"parent_card_id", "11111111-1111-4111-8111-111111111111"}}
+    );
+    create(nested, "proj-1", "Nested", 31, {{"parent_card_id", middle}, {"sort_key", 1.0}});
+    create(sibling, "proj-1", "Sibling", 32, {{"parent_card_id", middle}, {"sort_key", 2.0}});
+    create(grandchild, "proj-1", "Grandchild", 33, {{"parent_card_id", nested}});
+
+    const auto kept = call(
+        http::verb::post,
+        "/cards/" + nested + "/move",
+        {{"project_id", "proj-1"}, {"intent", "to_end"}}
+    );
+    REQUIRE(kept["ok"] == true);
+    REQUIRE(kept["data"]["parent_card_id"] == middle);
+    REQUIRE(kept["data"]["sort_key"] == 3.0);
+
+    const auto detached = call(
+        http::verb::post,
+        "/cards/" + nested + "/move",
+        {{"project_id", "proj-1"}, {"intent", "to_end"}, {"parent_card_id", nullptr}}
+    );
+    REQUIRE(detached["ok"] == true);
+    REQUIRE(detached["data"]["parent_card_id"].is_null());
+    const auto moved = card_store.get(nested);
+    REQUIRE(moved.has_value());
+    REQUIRE_FALSE(moved->parent_card_id.has_value());
+    const auto child = card_store.get(grandchild);
+    REQUIRE(child.has_value());
+    REQUIRE(child->parent_card_id == nested);
+  }
+
   SECTION("left no-op when source not among inferred siblings") {
     create("55555555-5555-4555-8555-555555555555", "proj-1", "Parent", 30);
     const auto payload = call(
@@ -1524,7 +1564,7 @@ TEST_CASE("CardRoutes residual branch coverage", "[card-routes]") {
     REQUIRE(before_status == http::status::ok);
     REQUIRE(before_payload["ok"] == true);
 
-    // parent_card_id null exercises normalize_parent_id(json null) branch.
+    // An explicit null parent_card_id moves the child out to the project's top level.
     auto [to_end_status, to_end_payload] = call(
         http::verb::post,
         "/cards/00000000-0000-4000-8000-000000000011/move",
@@ -1532,6 +1572,7 @@ TEST_CASE("CardRoutes residual branch coverage", "[card-routes]") {
     );
     REQUIRE(to_end_status == http::status::ok);
     REQUIRE(to_end_payload["ok"] == true);
+    REQUIRE(to_end_payload["data"]["parent_card_id"].is_null());
 
     auto [left_status, left_payload] = call(
         http::verb::post,

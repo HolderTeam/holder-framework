@@ -193,13 +193,14 @@ class Card:
     def move(
         self,
         *,
-        parent: Card | Unset = UNSET,
+        parent: Card | None | Unset = UNSET,
         before: Card | Unset = UNSET,
         after: Card | Unset = UNSET,
     ) -> Self:
         """Move into a parent or immediately before/after a target card.
 
-        Supply exactly one Card. Relative moves adopt the target's parent.
+        Supply exactly one Card, or parent=None to append the card to the
+        project's top level. Relative moves adopt the target's parent.
         The daemon enforces project membership and prevents hierarchy cycles.
         The moved card is refreshed; evaluated listings need explicit refresh.
         Writes are never retried, even if the subsequent refresh fails.
@@ -216,16 +217,22 @@ class Card:
         if len(supplied) != 1:
             raise TypeError("Supply exactly one of parent, before or after")
         intent, target = supplied[0]
-        if not isinstance(target, Card):
-            raise TypeError("The move target must be a Card")
-        self._project._holder._call(
-            post_cards_card_id_move,
-            self.id,
-            body=CardMoveRequest(
+        if intent is CardMoveIntent.INTO and target is None:
+            # An explicit null parent is the project's top level.
+            body = CardMoveRequest(
+                project_id=self._project.id,
+                intent=CardMoveIntent.TO_END,
+                parent_card_id=None,
+            )
+        elif isinstance(target, Card):
+            body = CardMoveRequest(
                 project_id=self._project.id,
                 intent=intent,
                 target_card_id=target.id,
-            ),
-            write=True,
+            )
+        else:
+            raise TypeError("The move target must be a Card")
+        self._project._holder._call(
+            post_cards_card_id_move, self.id, body=body, write=True
         )
         return self.refresh()
