@@ -63,7 +63,6 @@ jobs:
 
           {
             echo "CCACHE_DIR=${GITHUB_WORKSPACE}/.ccache"
-            echo "CCACHE_BASEDIR=${GITHUB_WORKSPACE}"
             echo "CCACHE_NOHASHDIR=true"
             echo "CCACHE_COMPILERCHECK=content"
             echo "CCACHE_MAXSIZE=1G"

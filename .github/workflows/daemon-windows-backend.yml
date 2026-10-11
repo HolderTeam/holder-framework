@@ -70,8 +70,9 @@ jobs:
         shell: pwsh
         run: |
           choco install ccache --no-progress -y
-          # No CCACHE_BASEDIR here: its relative include paths, resolved by Ninja, exceed the Windows
-          # path length limit for the core SDK's vcpkg headers. The runner's checkout path is fixed.
+          # No CCACHE_BASEDIR on any platform: runner checkout paths are fixed, its relative paths make
+          # __FILE__ relative (tests locate fixtures from it), and on Windows Ninja's resolution of the
+          # relative include paths exceeds the path length limit for the core SDK's vcpkg headers.
           "CCACHE_DIR=${{ github.workspace }}\.ccache" >> $env:GITHUB_ENV
           "CCACHE_NOHASHDIR=true" >> $env:GITHUB_ENV
           "CCACHE_COMPILERCHECK=content" >> $env:GITHUB_ENV
