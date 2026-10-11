@@ -228,7 +228,7 @@ jobs:
           holderctl --help
           mkdir -p out/ubuntu-packages
           cp "$package" out/ubuntu-packages/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: holder-daemon-${{ matrix.series }}-packages
           path: ${{ env.EXPORTED_DAEMON }}/out/ubuntu-packages/*.deb

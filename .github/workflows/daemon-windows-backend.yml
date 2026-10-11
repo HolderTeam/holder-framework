@@ -130,7 +130,7 @@ jobs:
           Pop-Location
 
       - name: Upload backend artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: holder-daemon-windows-backend${{ inputs.build_type == 'Release' && '-release' || '' }}
           path: daemon/out/artifacts/windows-backend/*
