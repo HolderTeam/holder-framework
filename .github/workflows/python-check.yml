@@ -87,7 +87,7 @@ jobs:
           CORE_COMMIT: ${{ steps.core.outputs.commit }}
         run: echo "key=$(.github/scripts/linux-daemon-cache-key.sh "$BUILD_TYPE" "$CORE_COMMIT")" >> "$GITHUB_OUTPUT"
       - id: restore
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: daemon/out/artifacts/linux-backend
           key: ${{ steps.key.outputs.key }}
@@ -103,7 +103,7 @@ jobs:
           build-type: ${{ env.BUILD_TYPE }}
           build-testing: 'OFF'
       - if: steps.restore.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: daemon/out/artifacts/linux-backend
           key: ${{ steps.key.outputs.key }}
