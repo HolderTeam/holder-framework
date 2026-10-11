@@ -49,7 +49,7 @@ jobs:
 
     steps:
       - name: Check out holder-framework
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: sources/holder-framework
 
@@ -95,7 +95,7 @@ jobs:
         run: python3 sources/holder-framework/staging/scripts/resolve-component-runs.py --platform macos --build-type "${{ steps.pins.outputs.build_type }}"
 
       - name: Check out holder-desktop metadata
-        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: ${{ steps.pins.outputs.desktop_repository }}
           ref: ${{ steps.artifact_runs.outputs.desktop_commit }}
