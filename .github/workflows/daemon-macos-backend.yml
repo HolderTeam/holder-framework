@@ -58,7 +58,24 @@ jobs:
             libsodium \
             libgit2 \
             md4c \
-            openssl@3
+            openssl@3 \
+            ccache
+
+          {
+            echo "CCACHE_DIR=${GITHUB_WORKSPACE}/.ccache"
+            echo "CCACHE_NOHASHDIR=true"
+            echo "CCACHE_COMPILERCHECK=content"
+            echo "CCACHE_MAXSIZE=1500M"
+          } >> "$GITHUB_ENV"
+
+      # Pull requests restore the compiler cache that main saves, as with vcpkg's binary cache.
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ inputs.build_type }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            ccache-${{ runner.os }}-${{ inputs.build_type }}-
 
       - name: Configure CMake
         working-directory: daemon
@@ -73,11 +90,26 @@ jobs:
             -DCMAKE_BUILD_TYPE="$HOLDER_CORE_BUILD_TYPE" \
             -DCMAKE_PREFIX_PATH="${brew_prefix};${openssl_prefix}" \
             -DOPENSSL_ROOT_DIR="${openssl_prefix}" \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
             -DBUILD_TESTING=ON
 
       - name: Build backend executables and tests
         working-directory: daemon
-        run: cmake --build build-macos --parallel
+        run: |
+          ccache --zero-stats
+          cmake --build build-macos --parallel
+
+      - name: Show compiler cache statistics
+        if: always()
+        run: ccache --show-stats --verbose
+
+      - name: Save compiler cache
+        if: github.event_name != 'pull_request'
+        uses: actions/cache/save@v4
+        with:
+          path: .ccache
+          key: ccache-${{ runner.os }}-${{ inputs.build_type }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Run tests
         working-directory: daemon
