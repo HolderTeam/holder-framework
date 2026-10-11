@@ -207,6 +207,20 @@ def test_card_moves_against_daemon(daemon):
         assert card.sort_key < root.sort_key
         assert child.refresh().parent_card_id == card.id
         assert [c.id for c in parent.children.refresh()] == [target.id]
+        # parent=None detaches a nested card, with its subtree, to the end of the top level.
+        nested = target.children.create(title="Nested", content="Nested body\n#keep")
+        grandchild = nested.children.create(title="Grandchild")
+        assert nested.move(parent=None) is nested
+        assert nested.parent_card_id is None
+        assert nested.sort_key > root.sort_key
+        assert nested.content == "Nested body\n#keep"
+        assert [t.name for t in nested.tags] == ["keep"]
+        assert grandchild.refresh().parent_card_id == nested.id
+        assert list(target.children.refresh()) == []
+        # An existing root moves to the end of the top level.
+        root.move(parent=None)
+        assert root.parent_card_id is None
+        assert root.sort_key > nested.sort_key
         with pytest.raises(APIError) as cycle:
             card.move(parent=child)
         assert cycle.value.status == 422
